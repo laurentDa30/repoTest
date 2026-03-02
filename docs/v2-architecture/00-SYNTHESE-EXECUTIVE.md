@@ -27,16 +27,19 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ## Architecture cible
 
-**Monolithe modulaire Laravel 12 + API-first + domaines isolés**
+**Monolithe modulaire Laravel 12 + API-first + Multi-région Hub & Spoke**
+
+> Chaque agence régionale dispose de sa propre application et BDD isolée (modèle franchise). Un Hub central gère le catalogue partagé, le monitoring et l'accès cross-régions via SSO.
 
 ## Stack V2 recommandée
 
 | Couche | Technologie | Justification |
 |--------|------------|---------------|
 | Backend | Laravel 12 (LTS) | Continuité de compétences, écosystème riche |
+| Multi-tenant | stancl/tenancy v3 (database-per-tenant) | Isolation BDD par région, codebase unique |
 | Frontend admin | Livewire 3 + Alpine.js + Tailwind CSS | Productivité maximale pour 2 devs |
 | Frontend client/amba | API REST + Vue 3 (Inertia.js) | UX riche, séparation progressive |
-| Base relationnelle | MySQL 8.0 (partitionné) | Maîtrisé, partitioning natif |
+| Base relationnelle | MySQL 8.0 (1 BDD central + 1 BDD/région) | Isolation pannes, RGPD, scaling indépendant |
 | CDR/Time-series | MySQL 8.0 partitionné + tables d'agrégation | Résout le problème 12 Go sans nouvelle techno |
 | Cache / Queue | Redis 7 | Cache, sessions, queues, rate limiting |
 | Search | Meilisearch | Recherche catalogue, clients, lignes |
@@ -53,10 +56,10 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 | Phase | Durée | Contenu |
 |-------|-------|---------|
 | **Phase 0** | 1 mois | Docker, CI/CD, tests, Laravel 12, monitoring |
-| **Phase 1** | 2-3 mois | API interne, refonte CDR (partitioning + agrégation), Redis |
-| **Phase 2** | 2-3 mois | Modularisation domaines, refonte facturation, Livewire 3 |
-| **Phase 3** | 2-3 mois | Portails client/ambassadeur en Vue 3, migration cloud |
-| **Phase 4** | Continu | Optimisations, nouvelles intégrations, scaling |
+| **Phase 1** | 2-3 mois | API interne, refonte CDR, Redis, **install stancl/tenancy + BDD centrale** |
+| **Phase 2** | 2-3 mois | Modularisation, refonte facturation, Livewire 3, **sync catalogue + SSO** |
+| **Phase 3** | 2-3 mois | Portails client/amba Vue 3, migration cloud, **provisioning auto de régions** |
+| **Phase 4** | Continu | Nouvelles régions, scaling infra (1 serveur/région si besoin) |
 
 ---
 
@@ -97,3 +100,4 @@ Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` indi
 > - `06-CYBERSECURITE.md` — Modèle de sécurité
 > - `07-LIVRABLES-FINAUX.md` — Diagrammes, stack, roadmap, plan de migration
 > - `08-ANALYSE-SCHEMA-BDD.md` — Analyse détaillée des 80+ tables, problèmes critiques, plan de migration schéma
+> - `09-ARCHITECTURE-MULTI-REGION.md` — Hub & Spoke, isolation BDD par région, sync catalogue, SSO, provisioning
