@@ -60,4 +60,40 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ---
 
-> Détails complets dans les documents d'analyse par rôle ci-dessous.
+## Découvertes critiques après analyse du schéma SQL (80+ tables)
+
+### Problème n°1 : `invoices.doc` est un JSON blob
+
+La colonne `doc` (JSON) contient **l'intégralité** de chaque facture (en-tête + lignes + calculs). Les colonnes `date`, `amount`, `paid`, `locked`, `number` sont des GENERATED STORED extraites du JSON. Chaque SELECT charge le JSON complet en mémoire. **C'est la cause réelle de la lenteur de la table invoices.**
+
+**Solution V2** : Refonte en `invoices` (en-tête normalisé) + `invoice_lines` (lignes détaillées). Migration progressive avec dual-write.
+
+### Problème n°2 : `calls` n'a pas de `client_id`
+
+Les requêtes CDR par client nécessitent un JOIN systématique via `lines`. Avec 12 Go+, c'est coûteux.
+
+**Solution V2** : Ajouter `client_id` dénormalisé + index composite. Quick win réalisable en 1 jour.
+
+### Point positif : `monthly_summaries` existe déjà
+
+L'agrégation mensuelle par ligne est en place. Il manque l'agrégation quotidienne et les colonnes financières.
+
+### Point positif : `cdr_files` assure la traçabilité des imports
+
+Le lien `calls.cdr_file_id` permet l'idempotence et la traçabilité.
+
+### Dette technique : tables `_bkp` et double système de tarification
+
+Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` indiquent une migration partielle de la tarification. À finaliser et nettoyer.
+
+---
+
+> Détails complets dans les documents d'analyse par rôle :
+> - `01-ARCHITECTE-LOGICIEL.md` — Architecture modulaire + revue cybersécurité
+> - `02-DEVOPS-CLOUD.md` — Infrastructure Scaleway + revue architecte
+> - `03-BACKEND.md` — API, patterns, imports + revue DevOps
+> - `04-FRONTEND.md` — Livewire 3 / Vue 3 / Tailwind + revue backend
+> - `05-RESPONSABLE-SI.md` — Gouvernance, coûts, risques + validation collective
+> - `06-CYBERSECURITE.md` — Modèle de sécurité
+> - `07-LIVRABLES-FINAUX.md` — Diagrammes, stack, roadmap, plan de migration
+> - `08-ANALYSE-SCHEMA-BDD.md` — Analyse détaillée des 80+ tables, problèmes critiques, plan de migration schéma
