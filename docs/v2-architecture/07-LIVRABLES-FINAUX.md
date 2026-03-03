@@ -5,86 +5,95 @@
 ## 1. Diagramme d'architecture cible
 
 ```
-                         ┌──────────────────────────────────┐
-                         │         INTERNET / USERS          │
-                         └──────────┬───────────────────────┘
-                                    │
-                         ┌──────────▼──────────────────────┐
-                         │   Cloudflare / Scaleway Edge     │
-                         │   WAF · DDoS · CDN · SSL        │
-                         │   DNS: *.cekoya.fr               │
-                         └──────────┬───────────────────────┘
-                                    │
-                         ┌──────────▼──────────────────────┐
-                         │     Scaleway Load Balancer       │
-                         │     SSL termination              │
-                         │     Health checks                │
-                         └───┬──────────┬──────────┬───────┘
-                             │          │          │
-               ┌─────────────▼──┐  ┌───▼────────┐ │
-               │  App Server 1  │  │ App Server 2│ │
-               │  Docker        │  │ Docker      │ │
-               │                │  │             │ │
-               │ ┌────────────┐ │  │ ┌─────────┐ │ │
-               │ │ Nginx      │ │  │ │ Nginx   │ │ │
-               │ │ PHP-FPM 8.3│ │  │ │ PHP-FPM │ │ │
-               │ │ Laravel 12 │ │  │ │ Laravel │ │ │
-               │ │ Livewire 3 │ │  │ │ 12      │ │ │
-               │ └────────────┘ │  │ └─────────┘ │ │
-               └────────────────┘  └─────────────┘ │
-                                                    │
-                    ┌───────────────────────────────▼───────┐
-                    │           Worker Server               │
-                    │           Docker                      │
-                    │  ┌─────────────────────────────────┐  │
-                    │  │ Laravel Horizon                  │  │
-                    │  │ ├── supervisor-default (5 proc)  │  │
-                    │  │ ├── supervisor-imports (3 proc)  │  │
-                    │  │ └── supervisor-billing (2 proc)  │  │
-                    │  ├─────────────────────────────────┤  │
-                    │  │ Laravel Scheduler (cron)         │  │
-                    │  ├─────────────────────────────────┤  │
-                    │  │ Laravel Reverb (WebSocket)       │  │
-                    │  └─────────────────────────────────┘  │
-                    └───────────────────────────────────────┘
-                             │          │           │
-          ┌──────────────────┼──────────┼───────────┼───────────┐
-          │                  │          │           │           │
- ┌────────▼────────┐ ┌──────▼───┐ ┌────▼─────┐ ┌──▼────────┐  │
- │ MySQL 8 Managé  │ │ Redis 7  │ │Meilisearch│ │  S3       │  │
- │                 │ │ Managé   │ │          │ │  Object   │  │
- │ Partitionnement │ │ Cache    │ │ Recherche│ │  Storage  │  │
- │ CDR par mois    │ │ Sessions │ │ clients  │ │           │  │
- │                 │ │ Queues   │ │ lignes   │ │ Factures  │  │
- │ Tables:         │ │ Rate     │ │ catalogue│ │ Documents │  │
- │ - calls (part.) │ │ limiting │ │          │ │ Exports   │  │
- │ - daily_summary │ │          │ │          │ │ CDR arch. │  │
- │ - monthly_sum.  │ │          │ │          │ │ Backups   │  │
- │ - invoices      │ │          │ │          │ │           │  │
- │ - clients, etc. │ │          │ │          │ │           │  │
- └─────────────────┘ └──────────┘ └──────────┘ └───────────┘  │
-          │                                                     │
-          │              VPC PRIVÉ (non exposé internet)         │
-          └─────────────────────────────────────────────────────┘
+                              ┌──────────────────────────────────┐
+                              │         INTERNET / USERS          │
+                              └──────────┬───────────────────────┘
+                                         │
+                              ┌──────────▼──────────────────────┐
+                              │   Cloudflare / Scaleway Edge     │
+                              │   WAF · DDoS · CDN · SSL        │
+                              │   DNS: *.cekoya.fr (wildcard)    │
+                              └──────────┬───────────────────────┘
+                                         │
+                              ┌──────────▼──────────────────────┐
+                              │     Scaleway Load Balancer       │
+                              │     SSL termination (wildcard)   │
+                              │     Health checks                │
+                              └───┬──────────┬──────────┬───────┘
+                                  │          │          │
+                    ┌─────────────▼──┐  ┌───▼────────┐ │
+                    │  App Server 1  │  │ App Server 2│ │
+                    │  Docker        │  │ Docker      │ │
+                    │                │  │             │ │
+                    │ ┌────────────┐ │  │ ┌─────────┐ │ │
+                    │ │ Nginx      │ │  │ │ Nginx   │ │ │
+                    │ │ PHP-FPM 8.3│ │  │ │ PHP-FPM │ │ │
+                    │ │ Laravel 12 │ │  │ │ Laravel │ │ │
+                    │ │ + stancl/  │ │  │ │ 12      │ │ │
+                    │ │   tenancy  │ │  │ │ +tenant │ │ │
+                    │ │ Livewire 3 │ │  │ │         │ │ │
+                    │ └────────────┘ │  │ └─────────┘ │ │
+                    └────────────────┘  └─────────────┘ │
+                                                        │
+                         ┌──────────────────────────────▼───────┐
+                         │           Worker Server               │
+                         │           Docker                      │
+                         │  ┌─────────────────────────────────┐  │
+                         │  │ Laravel Horizon                  │  │
+                         │  │ ├── supervisor-default (5 proc)  │  │
+                         │  │ ├── supervisor-imports (3 proc)  │  │
+                         │  │ ├── supervisor-billing (2 proc)  │  │
+                         │  │ └── supervisor-tenancy (2 proc)  │  │
+                         │  ├─────────────────────────────────┤  │
+                         │  │ Laravel Scheduler (cron)         │  │
+                         │  ├─────────────────────────────────┤  │
+                         │  │ Laravel Reverb (WebSocket)       │  │
+                         │  └─────────────────────────────────┘  │
+                         └───────────────────────────────────────┘
+                                  │          │           │
+               ┌──────────────────┼──────────┼───────────┼───────────┐
+               │                  │          │           │           │
+      ┌────────▼────────┐ ┌──────▼───┐ ┌────▼─────┐ ┌──▼────────┐  │
+      │ MySQL 8 Managé  │ │ Redis 7  │ │Meilisearch│ │  S3       │  │
+      │ (DB-DEV2-M)     │ │ Managé   │ │          │ │  Object   │  │
+      │                 │ │ Cache    │ │ Recherche│ │  Storage  │  │
+      │ Databases:      │ │ Sessions │ │ clients  │ │           │  │
+      │ ├ cekoya_central│ │ Queues   │ │ lignes   │ │ Par région│  │
+      │ │  └ tenants    │ │ Rate     │ │ catalogue│ │ /idf/     │  │
+      │ │  └ catalog    │ │ limiting │ │(par      │ │ /paca/    │  │
+      │ │  └ regional_  │ │          │ │ tenant)  │ │ /lyon/    │  │
+      │ │    summaries  │ │          │ │          │ │           │  │
+      │ ├ cekoya_idf    │ │          │ │          │ │ Factures  │  │
+      │ │  └ calls      │ │          │ │          │ │ Documents │  │
+      │ │  └ invoices   │ │          │ │          │ │ Exports   │  │
+      │ │  └ clients    │ │          │ │          │ │ CDR arch. │  │
+      │ │  └ daily_sum  │ │          │ │          │ │ Backups   │  │
+      │ ├ cekoya_paca   │ │          │ │          │ │           │  │
+      │ └ cekoya_lyon   │ │          │ │          │ │           │  │
+      └─────────────────┘ └──────────┘ └──────────┘ └───────────┘  │
+               │                                                     │
+               │              VPC PRIVÉ (non exposé internet)         │
+               └─────────────────────────────────────────────────────┘
 
-          INTÉGRATIONS EXTERNES (via module Integration)
-          ┌─────────┐ ┌─────────┐ ┌──────┐ ┌──────────┐ ┌──────┐ ┌────────┐
-          │Transatel│ │  Unyc   │ │ IELO │ │euroFIBER │ │ Wazo │ │Yousign │
-          │  API    │ │Import/  │ │ API  │ │  API     │ │Import│ │  API   │
-          │  REST   │ │  API    │ │      │ │          │ │      │ │        │
-          └─────────┘ └─────────┘ └──────┘ └──────────┘ └──────┘ └────────┘
+               INTÉGRATIONS EXTERNES (via module Integration)
+               ┌─────────┐ ┌─────────┐ ┌──────┐ ┌──────────┐ ┌──────┐ ┌────────┐
+               │Transatel│ │  Unyc   │ │ IELO │ │euroFIBER │ │ Wazo │ │Yousign │
+               │  API    │ │Import/  │ │ API  │ │  API     │ │Import│ │  API   │
+               │  REST   │ │  API    │ │      │ │          │ │      │ │        │
+               └─────────┘ └─────────┘ └──────┘ └──────────┘ └──────┘ └────────┘
 ```
 
-### Routing des portails
+### Routing des portails (multi-région)
 
 ```
-prod.cekoya.fr   ──► Laravel (Livewire 3)    ──► Middleware: admin auth + MFA
-client.cekoya.fr ──► Laravel (Inertia/Vue 3) ──► Middleware: client auth
-amba.cekoya.fr   ──► Laravel (Inertia/Vue 3) ──► Middleware: ambassador auth
-api.cekoya.fr    ──► Laravel API REST        ──► Middleware: Sanctum + throttle
+central.cekoya.fr            ──► Hub Central (Livewire 3) ──► MW: super_admin + MFA
+{region}.cekoya.fr           ──► Admin régional (Livewire) ──► MW: tenant + admin + MFA
+{region}-client.cekoya.fr    ──► Portail client (Inertia)  ──► MW: tenant + client auth
+{region}-amba.cekoya.fr      ──► Portail ambass. (Inertia) ──► MW: tenant + ambassador auth
+api.cekoya.fr                ──► Laravel API REST          ──► MW: Sanctum + throttle + tenant
 ```
 
-Même application Laravel, **routage par domaine** (Laravel route domain groups).
+Même application Laravel, **routage par domaine** (stancl/tenancy identifie le tenant via le sous-domaine, switch la BDD automatiquement).
 
 ---
 
@@ -96,6 +105,7 @@ Même application Laravel, **routage par domaine** (Laravel route domain groups)
 | Framework | Laravel | 12 (LTS) |
 | PHP | PHP | 8.3 |
 | ORM | Eloquent | Natif Laravel |
+| Multi-tenancy | stancl/tenancy | ^3.0 (database-per-tenant) |
 | Auth | Laravel Sanctum + Session | Natif |
 | Queues | Laravel Horizon + Redis | Natif |
 | WebSocket | Laravel Reverb | Natif (remplace Pusher) |
@@ -106,13 +116,15 @@ Même application Laravel, **routage par domaine** (Laravel route domain groups)
 | Tests | Pest PHP | ^3.0 |
 | Analyse statique | PHPStan / Larastan | Level 6 |
 | Code style | Laravel Pint | Natif |
+| Architecture | Monolithe modulaire DDD-lite | Domain/Application/Infrastructure |
 
 ### Frontend
 | Composant | Technologie | Portail |
 |-----------|------------|---------|
-| Admin UI | Livewire 3 + Alpine.js | prod.cekoya.fr |
-| Client UI | Inertia.js + Vue 3 | client.cekoya.fr |
-| Ambassador UI | Inertia.js + Vue 3 | amba.cekoya.fr |
+| Hub central | Livewire 3 + Alpine.js | central.cekoya.fr |
+| Admin régional | Livewire 3 + Alpine.js | {region}.cekoya.fr |
+| Client UI | Inertia.js + Vue 3 | {region}-client.cekoya.fr |
+| Ambassador UI | Inertia.js + Vue 3 | {region}-amba.cekoya.fr |
 | CSS Framework | Tailwind CSS 4 | Tous |
 | Charts | ApexCharts | Tous |
 | Build tool | Vite | Tous |
@@ -123,35 +135,39 @@ Même application Laravel, **routage par domaine** (Laravel route domain groups)
 | Cloud | Scaleway Paris |
 | Containers | Docker + Docker Compose |
 | Reverse proxy | Nginx |
-| DB | MySQL 8.0 Managé |
+| DB | MySQL 8.0 Managé (DB-DEV2-M, multi-BDD) |
 | Cache/Queue | Redis 7 Managé |
 | Search | Meilisearch |
-| Object Storage | Scaleway S3 |
+| Object Storage | Scaleway S3 (isolé par région) |
 | CI/CD | GitHub Actions |
-| DNS/WAF/CDN | Cloudflare |
+| DNS/WAF/CDN | Cloudflare (wildcard *.cekoya.fr) |
 | Monitoring | Laravel Pulse + Sentry + Scaleway Cockpit |
-| Secrets | Scaleway Secret Manager |
+| Secrets | Scaleway Secret Manager (par tenant) |
 
 ---
 
 ## 3. Stratégie de scaling
 
-### Scaling horizontal (si le parc double+)
+### Scaling horizontal — Deux axes : régions + charge
 
 ```
-Situation actuelle (380 clients, 6K lignes)
-└── 2 app servers + 1 worker ── SUFFISANT
+PHASE A — Serveur unique multi-tenant (1-3 régions)
+└── 2 app servers + 1 worker + 1 MySQL (multi-BDD)
+└── SUFFISANT pour 380-1000 clients répartis sur 3 régions
 
-Doublement (760 clients, 12K lignes)
-└── 2-3 app servers + 1-2 workers ── SUFFISANT
+PHASE B — Serveur par région (3-10 régions)
+└── 2 app servers (partagés) + 1 worker + MySQL par région
+└── Chaque région a sa propre BDD sur instance dédiée
+└── SUFFISANT pour 1000-3000 clients
 
-x5 (1900 clients, 30K lignes)
-└── 3-4 app servers + 2 workers + read replica MySQL
+PHASE C — Full scaling (10+ régions)
+└── App servers par région + workers par région
+└── Read replicas MySQL + load balancing par région
 └── Passage potentiel à Kubernetes si complexité justifiée
 ```
 
 ### Scaling vertical (immédiat)
-- MySQL : upgrade de l'instance Scaleway (CPU/RAM) sans downtime
+- MySQL : upgrade DB-DEV2-M → DB-DEV2-L sans downtime
 - Redis : upgrade instance
 - App servers : scale-up des containers
 
@@ -159,11 +175,13 @@ x5 (1900 clients, 30K lignes)
 
 | Goulot | Seuil | Solution |
 |--------|-------|----------|
-| CDR queries | > 5M records actifs | Partitionnement (déjà prévu) |
+| CDR queries (par région) | > 5M records actifs | `client_id` dénormalisé + agrégation + partitionnement |
 | Import Transatel horaire | > 100K CDR/batch | Batch processing parallélisé |
 | Facturation mensuelle | > 1000 factures simultanées | Queue billing dédiée + génération PDF async |
-| Recherche clients/lignes | > 50K entités | Meilisearch (déjà prévu) |
-| Sessions concurrentes | > 100 simultanées | Redis sessions (déjà prévu) |
+| Recherche clients/lignes | > 50K entités par région | Meilisearch (index par tenant) |
+| Sessions concurrentes | > 100 simultanées (toutes régions) | Redis sessions (déjà prévu) |
+| Sync catalogue vers N régions | > 10 régions | Queue tenant-sync + batch sync parallélisé |
+| MySQL unique saturé | > 5 BDD régionales actives | Passage Phase B (MySQL par région) |
 
 ---
 
@@ -316,9 +334,10 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 | Redis | Installation, migration sessions + cache | 1-2 jours |
 | Monitoring | Laravel Pulse + Sentry | 1 jour |
 | Audit trail | spatie/laravel-activitylog | 1 jour |
+| **stancl/tenancy** | Install + config, BDD centrale, V1 = premier tenant | 2-3 jours |
 
-**Livrable** : V1 dockerisée, CI/CD fonctionnel, monitoring en place, Laravel 12.
-**Risque** : Faible — aucune modification fonctionnelle.
+**Livrable** : V1 dockerisée, CI/CD fonctionnel, monitoring en place, Laravel 12, **multi-tenancy opérationnel (V1 = tenant initial)**.
+**Risque** : Faible — aucune modification fonctionnelle. La V1 tourne comme unique tenant.
 
 ### Phase 1 — Coeur critique (Mois 1-4)
 
@@ -326,37 +345,41 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Partitionnement table `calls` | Migration sans downtime, tables d'agrégation | 3-5 jours |
-| Job d'agrégation CDR | Nightly job + historique | 2-3 jours |
-| Archivage CDR > 12 mois | Export S3 + purge | 2-3 jours |
-| Refonte table `invoices` | Séparation headers/lines, totaux pré-calculés | 3-5 jours |
-| Génération PDF async | Queue billing + stockage S3 | 2-3 jours |
-| API REST interne v1 | Endpoints clients, lignes, catalogue | 5-7 jours |
+| Quick win CDR : `client_id` | Ajouter `client_id` dénormalisé + backfill | 1-2 jours |
+| `daily_call_summaries` | Nouvelle table d'agrégation quotidienne + nightly job | 2-3 jours |
+| Enrichir `monthly_summaries` | Ajouter `client_id`, `total_charge`, `total_price` | 1 jour |
+| Archivage CDR > 12 mois | Export S3 par région + purge | 2-3 jours |
+| Refonte `invoices` (sortie JSON blob) | `invoices_v2` + `invoice_lines` + migration JSON→normalisé | 5-7 jours |
+| Génération PDF async | Queue billing + stockage S3 (par région) | 2-3 jours |
+| API REST interne v1 | Routes tenant + routes centrales (voir 03-BACKEND) | 5-7 jours |
 | Module Integration (refacto) | Pattern Gateway pour Transatel, Unyc, Wazo | 5-7 jours |
-| Meilisearch | Indexation clients, lignes, catalogue | 2-3 jours |
+| Sync catalogue + SSO | Hub → régions via queue tenant-sync | 3-5 jours |
+| Meilisearch | Indexation par tenant (clients, lignes, catalogue) | 2-3 jours |
 | Laravel Reverb | Remplacement Pusher | 1-2 jours |
-| Migration cloud staging | Déployer la staging sur Scaleway | 2-3 jours |
+| Migration cloud staging | Staging Scaleway multi-BDD | 2-3 jours |
 
-**Livrable** : Performance CDR résolue, API interne opérationnelle, staging cloud.
-**Risque** : Moyen — le partitionnement CDR est l'opération la plus délicate.
+**Livrable** : Performance CDR résolue, facturation normalisée, API interne, **sync catalogue Hub ↔ régions**, staging cloud.
+**Risque** : Moyen — la migration `invoices.doc` JSON → normalisé est l'opération la plus délicate.
 
 ### Phase 2 — Modularisation métier (Mois 4-7)
 
-**Objectif** : Restructurer le code en modules DDD-lite.
+**Objectif** : Restructurer le code en modules DDD-lite (Domain/Application/Infrastructure).
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Module Prospect | Extraction + tests | 3-5 jours |
-| Module Client | Extraction + tests | 5-7 jours |
-| Module Telecom | Lignes, SIMs, portabilités | 5-7 jours |
-| Module Billing | Facturation, SEPA, comptabilité | 5-7 jours |
-| Module Catalog | Matériels, services, forfaits | 3-5 jours |
+| Module Prospect | Domain/Application/Infrastructure + tests | 3-5 jours |
+| Module Client | Domain/Application/Infrastructure + tests | 5-7 jours |
+| Module Telecom | Lignes, SIMs, portabilités (Domain-first) | 5-7 jours |
+| Module Billing | Facturation normalisée, SEPA, comptabilité | 5-7 jours |
+| Module Catalog | Matériels, services, forfaits (centralisé Hub) | 3-5 jours |
 | Module Stock | Gestion stock + SIMs | 2-3 jours |
+| Nettoyage BDD | Supprimer tables `_bkp`, finaliser `plan_rates` vs `pricing_zones` | 1-2 jours |
 | Tailwind CSS migration (début) | Nouveaux composants en Tailwind, coexistence Bootstrap | Continu |
-| Livewire 3 migration complète | Tous les composants admin | Continu |
-| Migration cloud production | Bascule DNS, blue-green | 2-3 jours |
+| Livewire 3 migration complète | Tous les composants admin + Hub central | Continu |
+| Migration cloud production | Bascule DNS (wildcard), blue-green | 2-3 jours |
+| Provisioning 2ème région | Tester le workflow complet d'ajout de région | 2-3 jours |
 
-**Livrable** : Architecture modulaire en production, cloud production actif.
+**Livrable** : Architecture modulaire DDD-lite en production, cloud production actif, **2 régions opérationnelles**.
 **Risque** : Moyen — la modularisation peut révéler du couplage caché.
 
 ### Phase 3 — Portails externes (Mois 7-10)
@@ -365,16 +388,18 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Portail client Vue 3 | Dashboard, lignes, consommation, factures | 10-15 jours |
-| Portail ambassadeur Vue 3 | Dashboard, paiements, historique | 5-7 jours |
+| Portail client Vue 3 | Dashboard, lignes, consommation, factures (scopé par tenant) | 10-15 jours |
+| Portail ambassadeur Vue 3 | Dashboard, paiements, historique (scopé par tenant) | 5-7 jours |
+| Dashboard Hub central | Vue synthétique multi-régions + SSO | 3-5 jours |
 | Suppression Bootstrap | Migration Tailwind complète | 3-5 jours |
 | Module Environnement (refacto) | RSE, émissions, captation | 3-5 jours |
 | Module Content (refacto) | Rapports, mailing, templates | 3-5 jours |
-| Tests E2E | Couverture des flux critiques | 3-5 jours |
-| Documentation API | OpenAPI/Swagger pour l'API REST | 2-3 jours |
-| Pen test | Audit sécurité externe | 1-2 semaines (externe) |
+| Provisioning auto de régions | CLI artisan + UI admin pour créer une nouvelle région | 3-5 jours |
+| Tests E2E | Couverture flux critiques + tests cross-tenant | 3-5 jours |
+| Documentation API | OpenAPI/Swagger (routes tenant + routes centrales) | 2-3 jours |
+| Pen test | Audit sécurité externe (incluant tests cross-tenant) | 1-2 semaines (externe) |
 
-**Livrable** : V2 complète, tous portails migrés, documentation, sécurité validée.
+**Livrable** : V2 complète, tous portails migrés, **provisioning auto de régions**, documentation, sécurité validée.
 
 ---
 
@@ -382,34 +407,38 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 
 | # | Risque | Probabilité | Impact | Mitigation | Owner |
 |---|--------|-------------|--------|------------|-------|
-| R1 | Migration CDR cause une perte de données | Faible | CRITIQUE | Backup complet avant, migration réversible, validation ligne par ligne | Backend |
+| R1 | Migration `invoices.doc` JSON → normalisé perd des données | Faible | CRITIQUE | Script de migration avec checksums : comparer totaux JSON vs colonnes pour chaque facture | Backend |
 | R2 | L'équipe de 2 devs ne tient pas la cadence | Élevée | ÉLEVÉ | Phases ajustables, report non bloquant, recrutement anticipé si croissance confirmée | SI |
-| R3 | Régression fonctionnelle sur la facturation | Moyenne | CRITIQUE | Tests automatisés sur les montants, double-run (V1 et V2 en parallèle) pendant 1 mois | Backend |
+| R3 | Régression fonctionnelle sur la facturation | Moyenne | CRITIQUE | Tests automatisés sur les montants, dual-write pendant transition | Backend |
 | R4 | Migration cloud = downtime | Faible | ÉLEVÉ | Blue-green deployment, bascule DNS, rollback instantané | DevOps |
 | R5 | Fournisseur change son API pendant la migration | Moyenne | MOYEN | Pattern Gateway isole l'impact, un seul fichier à modifier | Architecte |
 | R6 | Données sensibles exposées via la nouvelle API | Faible | CRITIQUE | API Resources contrôlent la sortie, tests de sécurité, pen test | Cybersec |
 | R7 | Cohabitation V1/V2 génère des bugs de données | Moyenne | ÉLEVÉ | Migrations rétro-compatibles, tests d'intégration, monitoring actif | Backend + DevOps |
 | R8 | Bootstrap + Tailwind coexistence génère des conflits CSS | Moyenne | FAIBLE | Préfixe Tailwind, isolation progressive | Frontend |
+| R9 | Fuite de données cross-tenant | Faible | CRITIQUE | stancl/tenancy force l'isolation BDD, tests anti-fuite automatisés, pen test cross-tenant | Cybersec |
+| R10 | Sync catalogue désynchronisée entre régions | Moyenne | ÉLEVÉ | Checksums, logs de sync, retry auto, alerte si écart | Backend |
+| R11 | MySQL unique saturé par N BDD régionales | Moyenne | MOYEN | Monitoring taille/BDD, passage Phase B si dépassement | DevOps |
 
 ---
 
 ## 9. Roadmap technique priorisée
 
 ```
-         ROADMAP V2 CEKOYA
+         ROADMAP V2 CEKOYA (Multi-région + DDD-lite)
 
 Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)              Q4 (Mois 9-12)
 ┌──────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────────┐
 │ 🔴 CRITIQUE              │ │ 🟠 IMPORTANT             │ │ 🟡 VALEUR AJOUTÉE        │ │ 🟢 CONSOLIDATION         │
 │                          │ │                          │ │                          │ │                          │
-│ ✓ Docker + CI/CD         │ │ ✓ Modularisation code    │ │ ✓ Portail client Vue 3   │ │ ✓ Documentation complète │
-│ ✓ Laravel 12 upgrade     │ │ ✓ Refonte facturation    │ │ ✓ Portail ambass. Vue 3  │ │ ✓ Pen test externe       │
-│ ✓ Redis (cache+queues)   │ │ ✓ Modules DDD-lite       │ │ ✓ Suppression Bootstrap  │ │ ✓ Tests E2E              │
-│ ✓ Monitoring (Pulse+     │ │ ✓ Livewire 3 complet     │ │ ✓ Module Environnement   │ │ ✓ Optimisation perf      │
-│   Sentry)                │ │ ✓ Migration cloud prod   │ │ ✓ Module Content         │ │ ✓ Recrutement dev #3     │
-│ ✓ Partitionnement CDR    │ │ ✓ Tailwind (début)       │ │ ✓ API documentation      │ │ ✓ KPI review             │
-│ ✓ Tables agrégation      │ │                          │ │                          │ │                          │
-│ ✓ API interne v1         │ │                          │ │                          │ │                          │
+│ ✓ Docker + CI/CD         │ │ ✓ Modules DDD-lite       │ │ ✓ Portail client Vue 3   │ │ ✓ Documentation complète │
+│ ✓ Laravel 12 upgrade     │ │   (Domain/App/Infra)     │ │ ✓ Portail ambass. Vue 3  │ │ ✓ Pen test (cross-tenant)│
+│ ✓ stancl/tenancy setup   │ │ ✓ Refonte invoices       │ │ ✓ Dashboard Hub central  │ │ ✓ Tests E2E              │
+│ ✓ Redis (cache+queues)   │ │   (sortie JSON blob)     │ │ ✓ Suppression Bootstrap  │ │ ✓ Provisioning auto      │
+│ ✓ Monitoring (Pulse+     │ │ ✓ Livewire 3 complet     │ │ ✓ Module Environnement   │ │   de régions             │
+│   Sentry)                │ │ ✓ Sync catalogue + SSO   │ │ ✓ Module Content         │ │ ✓ Optimisation perf      │
+│ ✓ Quick win CDR          │ │ ✓ Migration cloud prod   │ │ ✓ API documentation      │ │ ✓ Recrutement dev #3     │
+│   (client_id + agrég.)   │ │ ✓ Tailwind (début)       │ │ ✓ Nettoyage BDD (_bkp)   │ │ ✓ KPI review             │
+│ ✓ API interne v1         │ │ ✓ Provisioning 2è région │ │                          │ │                          │
 │ ✓ Audit trail            │ │                          │ │                          │ │                          │
 │ ✓ Pattern Gateway        │ │                          │ │                          │ │                          │
 │ ✓ Meilisearch            │ │                          │ │                          │ │                          │
@@ -417,8 +446,9 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 │ ✓ Staging cloud          │ │                          │ │                          │ │                          │
 │                          │ │                          │ │                          │ │                          │
 │ Équipe: 2 devs           │ │ Équipe: 2 devs           │ │ Équipe: 2-3 devs         │ │ Équipe: 3 devs           │
-│ Infra: local + staging   │ │ Infra: cloud prod        │ │ Infra: cloud stable      │ │ Infra: cloud optimisé    │
-│ Budget: ~150€/mois cloud │ │ Budget: ~170€/mois cloud │ │ Budget: ~200€/mois cloud │ │ Budget: ~200€/mois cloud │
+│ Infra: local + staging   │ │ Infra: cloud prod        │ │ Infra: cloud + 2 régions │ │ Infra: cloud + N régions │
+│ Tenant: V1 = 1er tenant  │ │ Tenant: 2 régions        │ │ Budget: ~250€/mois       │ │ Budget: ~300-500€/mois   │
+│ Budget: ~165€/mois cloud │ │ Budget: ~200€/mois cloud │ │                          │ │                          │
 └──────────────────────────┘ └──────────────────────────┘ └──────────────────────────┘ └──────────────────────────┘
 ```
 
@@ -426,17 +456,34 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 
 ## Annexe : Checklist de validation pré-production
 
+### Technique
 - [ ] Tous les tests passent (> 60% couverture)
 - [ ] PHPStan level 6 sans erreur
 - [ ] Audit de dépendances clean (composer audit)
 - [ ] Scan secrets clean (TruffleHog)
 - [ ] Health check endpoint opérationnel
-- [ ] Backups automatisés et testés (restore)
+- [ ] Backups automatisés et testés (restore, par tenant)
 - [ ] Monitoring + alertes configurés
+- [ ] Blue-green deploy testé avec rollback
+
+### Sécurité
 - [ ] Audit trail actif sur toutes les entités sensibles
-- [ ] MFA actif pour tous les utilisateurs admin
+- [ ] MFA actif pour tous les utilisateurs admin + super_admin
 - [ ] Rate limiting actif sur toutes les routes API
 - [ ] CSP + HSTS headers en place
-- [ ] Blue-green deploy testé avec rollback
-- [ ] Documentation API (OpenAPI) à jour
+- [ ] Tests anti-fuite cross-tenant passent
+- [ ] SSO tokens validés (one-time-use, expiration 60s)
+- [ ] KMS externe configuré (pas de clés dans .env)
+
+### Multi-tenant
+- [ ] stancl/tenancy opérationnel (switch BDD par sous-domaine)
+- [ ] V1 fonctionne comme premier tenant (zéro régression)
+- [ ] Sync catalogue Hub → régions testée et validée
+- [ ] Provisioning d'une nouvelle région documenté et testé
+- [ ] Backups par BDD régionale automatisés
+- [ ] Meilisearch indexe par tenant
+
+### Documentation
+- [ ] Documentation API (OpenAPI) à jour (routes tenant + centrales)
 - [ ] Run book d'incidents documenté
+- [ ] Procédure de provisioning de nouvelle région documentée

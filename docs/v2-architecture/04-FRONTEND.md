@@ -27,10 +27,11 @@
 
 ## 2. Stratégie Frontend — Deux approches selon le portail
 
-### Portail Admin (prod.cekoya.fr) → Livewire 3 + Alpine.js + Tailwind
+### Portail Admin régional ({region}.cekoya.fr) + Hub central (central.cekoya.fr) → Livewire 3 + Alpine.js + Tailwind
 
 **Justification** :
-- L'admin est utilisé par ~12 personnes internes → pas besoin d'une SPA
+- L'admin régional est utilisé par l'équipe locale (quelques personnes) → pas besoin d'une SPA
+- Le Hub central est utilisé par les super-admins (~5 personnes) → dashboard de synthèse + connexion SSO aux régions
 - Livewire 3 apporte tout ce qui manque à la v2 : lazy loading, performances, meilleure DX
 - Tailwind remplace Bootstrap : plus léger, plus maintenable, design system intégré
 - Alpine.js couvre les interactions client-side légères
@@ -68,10 +69,11 @@
 </div>
 ```
 
-### Portails Client et Ambassadeur → Inertia.js + Vue 3
+### Portails Client et Ambassadeur ({region}-client.cekoya.fr / {region}-amba.cekoya.fr) → Inertia.js + Vue 3
 
 **Justification** :
 - Les portails client/ambassadeur sont des interfaces **publiques** (utilisateurs externes)
+- Chaque portail est automatiquement scopé à la région via stancl/tenancy (sous-domaine → BDD)
 - Besoin de transitions fluides, d'états complexes côté client (panier, configurateur de forfait)
 - Inertia.js permet d'utiliser Vue 3 **sans construire une API séparée** dans un premier temps
 - Progressive : on peut commencer avec Inertia et migrer vers une API REST pure plus tard
@@ -276,7 +278,10 @@ router.on('before', (event) => {
 > Certains composants (StatusBadge, DataCard) existeront en double (Blade + Vue). C'est inévitable avec deux stacks. Maintenir la cohérence visuelle via le design system Tailwind (mêmes classes, mêmes couleurs).
 
 ### 3. Les graphiques de CDR seront alimentés par les tables d'agrégation
-> Les `ConsumptionChart` côté frontend **ne doivent jamais** requêter la table `calls` directement. Toujours passer par `daily_call_summaries` / `monthly_call_summaries`. C'est un contrat backend ↔ frontend.
+> Les `ConsumptionChart` côté frontend **ne doivent jamais** requêter la table `calls` directement. Toujours passer par `daily_call_summaries` / `monthly_summaries` (existante, à enrichir). C'est un contrat backend ↔ frontend.
+
+### 4. Hub central : dashboard de synthèse multi-régions
+> Le Hub central affiche un dashboard agrégé de toutes les régions (via `regional_summaries`). Chaque carte de région est cliquable → SSO vers l'admin régional. Le même design system Tailwind est utilisé pour le Hub et les régions.
 
 ## Verdict
 Stratégie frontend **cohérente et réaliste pour 2 devs**. Le duo Livewire 3 + Inertia/Vue 3 est le meilleur compromis productivité/UX pour cette situation.

@@ -36,13 +36,13 @@
 
 **Alternative acceptable** : OVH Cloud si le budget est très contraint, mais les services managés sont moins matures.
 
-### Architecture d'infrastructure
+### Architecture d'infrastructure (Multi-région Phase A : serveur unique)
 
 ```
-                    ┌─────────────────────┐
-                    │   Scaleway DNS /    │
-                    │   Cloudflare DNS    │
-                    └──────────┬──────────┘
+                    ┌─────────────────────────┐
+                    │    Cloudflare DNS/WAF    │
+                    │  *.cekoya.fr → LB        │
+                    └──────────┬──────────────┘
                                │
                     ┌──────────▼──────────┐
                     │   Load Balancer     │
@@ -56,8 +56,9 @@
     │  App Server 1  │ │ App Server 2 │ │  Worker      │
     │  (DEV1-Small)  │ │ (DEV1-Small) │ │  (queues)    │
     │  Docker        │ │ Docker       │ │  Docker      │
-    │  Laravel +     │ │ Laravel +    │ │  horizon +   │
-    │  Nginx + PHP   │ │ Nginx + PHP  │ │  scheduler   │
+    │  Laravel 12 +  │ │ Laravel 12 + │ │  horizon +   │
+    │  stancl/tenant │ │ stancl/ten.  │ │  scheduler   │
+    │  Nginx + PHP   │ │ Nginx + PHP  │ │  + sync jobs │
     └────────────────┘ └──────────────┘ └──────────────┘
               │                │                 │
               └────────────────┼─────────────────┘
@@ -67,25 +68,33 @@
 ┌────────▼─────────┐ ┌────────▼─────────┐ ┌──────────▼────────┐
 │ Scaleway Managed │ │ Scaleway Managed │ │ Scaleway Object   │
 │ MySQL 8          │ │ Redis 7          │ │ Storage (S3)      │
-│ (DB-DEV2-S)      │ │ (RED1-MICRO)     │ │ Factures, exports │
+│ (DB-DEV2-M)      │ │ (RED1-MICRO)     │ │ Factures, exports │
 │                  │ │ Cache + queues   │ │ backups, CDR arch  │
+│ Databases:       │ │                  │ │                   │
+│ ├ cekoya_central │ │                  │ │ Par région :      │
+│ ├ cekoya_idf     │ │                  │ │ ├ /idf/invoices/  │
+│ ├ cekoya_paca    │ │                  │ │ ├ /paca/invoices/ │
+│ └ cekoya_lyon    │ │                  │ │ └ /lyon/invoices/ │
 └──────────────────┘ └──────────────────┘ └───────────────────┘
 ```
 
-### Estimation de coûts mensuels (Scaleway)
+> **Scaling Phase B** (quand le nombre de régions le justifie) : un serveur dédié par région. Voir `09-ARCHITECTURE-MULTI-REGION.md` section 9 pour le détail.
+
+### Estimation de coûts mensuels (Scaleway) — Multi-région
 
 | Ressource | Spec | Coût estimé/mois |
 |-----------|------|-------------------|
 | 2x App Server (DEV1-S, 2vCPU/2GB) | Containers ou instances | ~30€ |
-| 1x Worker (DEV1-S) | Queue processing | ~15€ |
-| MySQL Managé (DB-DEV2-S) | 2vCPU/4GB/50GB SSD | ~40€ |
+| 1x Worker (DEV1-S) | Queue processing + sync jobs | ~15€ |
+| MySQL Managé (**DB-DEV2-M**) | 4vCPU/8GB/100GB SSD (multi-BDD) | ~70€ |
 | Redis Managé (RED1-MICRO) | 1GB | ~15€ |
-| Load Balancer | 1 LB | ~10€ |
-| Object Storage | ~100 Go | ~5€ |
-| Backups | Snapshots auto | ~10€ |
-| **Total estimé** | | **~125-150€/mois** |
+| Load Balancer | 1 LB (wildcard *.cekoya.fr) | ~10€ |
+| Object Storage | ~200 Go (par région isolée) | ~10€ |
+| Backups | Snapshots auto (par BDD régionale) | ~15€ |
+| **Total estimé (Phase A : 1 serveur)** | | **~165-200€/mois** |
+| **Par région supplémentaire (Phase B)** | Serveur dédié + BDD | **+50-80€/mois** |
 
-> Comparaison hébergement local : coût électricité + maintenance matérielle + risque de panne probablement supérieur, sans la résilience.
+> Le surcoût multi-région est modéré en Phase A (toutes les BDD sur le même MySQL managé). En Phase B (serveur par région), chaque agence coûte ~50-80€/mois supplémentaire — comparable à un abonnement SaaS classique.
 
 ## 3. Conteneurisation
 
@@ -113,7 +122,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     environment:
-      MYSQL_DATABASE: cekoya
+      MYSQL_DATABASE: cekoya_central
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
     ports:
       - "3306:3306"
@@ -278,7 +287,7 @@ jobs:
 
 | Élément | Stratégie | Fréquence | Rétention |
 |---------|-----------|-----------|-----------|
-| Base MySQL | Snapshot Scaleway managé + mysqldump vers S3 | Quotidien + avant chaque déploiement | 30 jours |
+| Base MySQL (chaque BDD régionale) | Snapshot Scaleway managé + mysqldump vers S3 (par région) | Quotidien + avant chaque déploiement | 30 jours |
 | Fichiers (factures, docs) | Déjà sur S3 (Object Storage) = répliqué | Natif | Versioning S3 activé |
 | Configuration | Dans Git (sauf secrets) | Chaque commit | Infini |
 | Secrets | Scaleway Secret Manager ou fichier `.env` chiffré | Chaque modification | Versionné |
@@ -291,9 +300,11 @@ jobs:
 | Risque | Mitigation |
 |--------|------------|
 | Migration cloud ratée = downtime | Phase de cohabitation : app sur local + backup cloud prêt, bascule DNS finale |
-| Coûts cloud dérapent | Alertes budget Scaleway, revue mensuelle, instances réservées si stable |
+| Coûts cloud dérapent avec multi-régions | Alertes budget Scaleway, revue mensuelle, Phase A (serveur unique) maîtrise les coûts |
 | Compétence Docker insuffisante chez les 2 devs | Docker Compose d'abord (simple), formation progressive |
 | Dépendance Scaleway | Architecture Docker = portable vers n'importe quel cloud |
+| MySQL saturé avec N BDD régionales | Monitoring taille par BDD, passage Phase B (serveur par région) si dépassement |
+| Backup régional échoue silencieusement | Script de vérification automatique post-backup par tenant, alerte si manquant |
 
 ---
 
@@ -320,4 +331,4 @@ jobs:
 > La proposition de monitoring est dans le document dédié, mais les agents de collecte (Prometheus/Grafana ou Scaleway Cockpit) doivent être budgétés dans l'infra.
 
 ## Verdict
-Infrastructure **bien dimensionnée et réaliste**. Le budget de ~150-170€/mois (avec Meilisearch) est excellent pour cette taille de plateforme. Pas de sur-ingénierie.
+Infrastructure **bien dimensionnée et réaliste**. Le budget de ~200€/mois en Phase A multi-région est excellent pour cette taille de plateforme. Le passage en Phase B (~+50-80€/région) reste maîtrisé et justifié par l'isolation des pannes (modèle franchise).

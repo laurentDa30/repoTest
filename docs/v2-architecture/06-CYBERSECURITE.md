@@ -9,6 +9,7 @@
 | **Serveur local (on-premise)** | CRITIQUE | Pas de WAF, pas de DDoS protection, exposition directe |
 | **Chiffrement "dans la même base"** | ÉLEVÉ | Clés probablement dans `.env`, même machine = un seul point de compromission |
 | **3 portails, 1 application** | ÉLEVÉ | Une faille sur le portail client impacte l'admin |
+| **Pas d'isolation des données par région** | ÉLEVÉ | Toutes les données dans une seule BDD — pas de cloisonnement en cas de compromission |
 | **Pas de CI/CD avec checks sécu** | MOYEN | Pas de scan de dépendances, pas de SAST |
 | **Laravel 10 (EOL)** | MOYEN | Plus de patches de sécurité |
 | **MFA existant** | ✅ POSITIF | Bon point — à étendre |
@@ -33,6 +34,12 @@ Couche 1 — RÉSEAU
 ├── Firewall : seuls ports 80/443 ouverts
 ├── Load Balancer : rate limiting L4
 └── VPC privé : DB + Redis + workers non exposés à internet
+
+Couche 1b — ISOLATION MULTI-TENANT
+├── stancl/tenancy : BDD séparée par région (blast radius limité)
+├── Middleware tenant : switch automatique, pas d'accès cross-tenant
+├── Credentials BDD par tenant : chaque région a ses propres creds
+└── Hub central : accès SSO contrôlé, pas d'accès direct aux BDD régionales
 
 Couche 2 — APPLICATION
 ├── Laravel Sanctum : auth API avec token scoping
@@ -62,26 +69,35 @@ Couche 4 — OPÉRATIONNEL
 #### Authentification
 
 ```php
-// Matrice d'authentification par portail
+// Matrice d'authentification par portail (multi-région)
 //
-// Portail Admin (prod.cekoya.fr)
+// Hub Central (central.cekoya.fr)
+// ├── Session Laravel + MFA obligatoire
+// ├── Session timeout : 15 min d'inactivité (accès super-admin)
+// ├── IP allowlisting recommandé
+// ├── SSO vers les portails régionaux (token signé, one-time-use)
+// └── Audit log de chaque connexion + chaque accès cross-région
+//
+// Portail Admin régional ({region}.cekoya.fr)
 // ├── Session Laravel + MFA obligatoire
 // ├── Session timeout : 30 min d'inactivité
 // ├── IP allowlisting optionnel (si accès bureaux uniquement)
+// ├── Données isolées dans la BDD du tenant
 // └── Audit log de chaque connexion
 //
-// Portail Client (client.cekoya.fr)
+// Portail Client ({region}-client.cekoya.fr)
 // ├── Session Laravel + MFA recommandé
 // ├── Session timeout : 60 min
 // ├── Password policy : min 12 chars, pas de common passwords
+// ├── Scoped au tenant (pas d'accès cross-région possible)
 // └── Notification email à chaque connexion depuis un nouvel appareil
 //
-// Portail Ambassadeur (amba.cekoya.fr)
+// Portail Ambassadeur ({region}-amba.cekoya.fr)
 // ├── Session Laravel + MFA recommandé
-// └── Accès limité (données financières ambassadeur uniquement)
+// └── Accès limité (données financières ambassadeur uniquement, scopé au tenant)
 //
 // API interne
-// ├── Laravel Sanctum avec token scoping
+// ├── Laravel Sanctum avec token scoping + tenant scoping
 // ├── Tokens avec expiration (7 jours max)
 // └── Rate limiting strict (60 req/min par défaut, ajustable par route)
 ```
@@ -92,8 +108,9 @@ Couche 4 — OPÉRATIONNEL
 // app/Modules/Auth/Models/Permission.php
 // Granularité : module.action (ex: clients.view, billing.export, cdr.view)
 
-// Rôles par défaut
-// admin         → toutes permissions
+// Rôles par défaut (scopés au tenant)
+// super_admin   → Hub central, accès toutes régions, provisioning
+// admin         → toutes permissions (dans son tenant uniquement)
 // manager       → gestion clients + facturation (pas de config système)
 // operator      → gestion lignes + SIM + portabilités
 // viewer        → lecture seule
@@ -170,7 +187,8 @@ class Client extends Model
 |--------|------------|------------|
 | Clé APP_KEY | `.env` sur le serveur | Scaleway Secret Manager |
 | Clés API fournisseurs | `.env` | Scaleway Secret Manager |
-| Credentials BDD | `.env` | Variables d'environnement du container (injectées au runtime) |
+| Credentials BDD centrale | `.env` | Variables d'environnement du container (injectées au runtime) |
+| Credentials BDD par tenant | N/A | Scaleway Secret Manager (un secret par région) |
 | Tokens Yousign | `.env` | Scaleway Secret Manager |
 
 ### D. Audit Trail
@@ -241,6 +259,40 @@ class CircuitBreaker
     curl -sI https://staging.cekoya.fr | grep -E "^(Content-Security|Strict-Transport|X-Frame|X-Content-Type)"
 ```
 
+### F. Sécurité multi-tenant (stancl/tenancy)
+
+```php
+// Risques spécifiques au multi-tenancy et mitigations
+
+// 1. FUITE DE DONNÉES CROSS-TENANT
+// Risque : une requête oublie le scope tenant → données d'une autre région exposées
+// Mitigation :
+// - stancl/tenancy force le switch de BDD au niveau middleware (pas de scope oubliable)
+// - Tests automatisés : vérifier qu'aucune requête ne tape sur la BDD centrale par erreur
+// - Middleware tenant obligatoire sur TOUTES les routes régionales (pas d'opt-in)
+
+// 2. ESCALADE DE PRIVILÈGES VIA LE HUB
+// Risque : un admin régional accède au Hub central ou à une autre région
+// Mitigation :
+// - Le Hub central a sa propre table users (pas partagée avec les tenants)
+// - Les tokens SSO sont one-time-use, expirés après 60 secondes, signés HMAC
+// - L'audit trail du Hub logge chaque accès cross-région avec IP + user_agent
+
+// 3. INJECTION VIA LE NOM DE TENANT
+// Risque : un sous-domaine malformé manipule le switch de BDD
+// Mitigation :
+// - Whitelist de tenants (table `tenants` dans la BDD centrale)
+// - Pas de tenant dynamique basé sur l'input utilisateur
+// - Validation regex sur le sous-domaine avant le switch
+
+// 4. SYNC CATALOGUE EMPOISONNÉE
+// Risque : le Hub pousse des données corrompues vers les régions
+// Mitigation :
+// - Checksums sur chaque payload de sync
+// - La région valide le schema avant d'appliquer
+// - Rollback automatique si la validation échoue
+```
+
 ## 4. Plan d'action sécurité
 
 | Priorité | Action | Effort | Impact |
@@ -248,12 +300,14 @@ class CircuitBreaker
 | 🔴 P0 | Migrer vers le cloud (éliminer l'exposition du serveur local) | Inclus dans migration | CRITIQUE |
 | 🔴 P0 | Externaliser les clés de chiffrement (KMS) | 1-2 jours | ÉLEVÉ |
 | 🔴 P0 | Mettre en place l'audit trail | 1-2 jours | ÉLEVÉ |
+| 🔴 P0 | Isolation multi-tenant (stancl/tenancy + BDD séparées) | Inclus dans migration | CRITIQUE |
 | 🟠 P1 | WAF Cloudflare ou Scaleway Edge | 1 jour | ÉLEVÉ |
 | 🟠 P1 | Rate limiting sur toutes les routes API | 1 jour | MOYEN |
 | 🟠 P1 | CSP headers + HSTS | 0.5 jour | MOYEN |
+| 🟠 P1 | Tests anti-fuite cross-tenant automatisés | 2 jours | ÉLEVÉ |
 | 🟡 P2 | Scan de dépendances dans CI/CD | 0.5 jour | MOYEN |
-| 🟡 P2 | Rotation automatique des secrets | 1 jour | MOYEN |
-| 🟢 P3 | Pen test externe | Budget externe | ÉLEVÉ |
+| 🟡 P2 | Rotation automatique des secrets (par tenant) | 1-2 jours | MOYEN |
+| 🟢 P3 | Pen test externe (incluant tests cross-tenant) | Budget externe | ÉLEVÉ |
 
 ## 5. Risques résiduels acceptés
 
@@ -262,3 +316,5 @@ class CircuitBreaker
 | Pas de chiffrement de bout en bout des CDR en transit interne | Les CDR transitent dans un VPC privé, chiffrement TLS entre services, le risque est faible |
 | Pas de HSM dédié pour les clés | Disproportionné pour cette taille — KMS cloud est suffisant |
 | Pas de SOC/SIEM | Budget et taille d'équipe ne le justifient pas — Sentry + audit trail + alertes suffisent |
+| Toutes les BDD régionales sur le même serveur MySQL (Phase A) | Acceptable en Phase A car le MySQL managé Scaleway isole les databases. En Phase B, chaque région aura son propre serveur |
+| Pas de chiffrement inter-BDD pour la sync catalogue | La sync se fait en interne via jobs Laravel (pas de transit réseau externe), le VPC protège |

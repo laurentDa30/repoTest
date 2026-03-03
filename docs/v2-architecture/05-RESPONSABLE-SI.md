@@ -4,6 +4,8 @@
 
 Cekoya est un opérateur télécom B2B en croissance (objectif : doubler le parc de 380 à 760+ clients). La plateforme est l'outil **central** de l'activité — ce n'est pas un outil support, c'est le coeur métier. Toute indisponibilité = perte directe de capacité opérationnelle.
 
+**Nouvel enjeu stratégique** : déploiement multi-régional (modèle franchise). Chaque agence régionale disposera de sa propre application et BDD isolée. Un Hub central gère le catalogue partagé, le monitoring et l'accès cross-régions. Cela permet l'isolation des pannes, le scaling indépendant et la souveraineté des données par région.
+
 ## 2. Analyse des risques projet
 
 ### Risque n°1 : La V2 cannibalise la V1 sans la remplacer
@@ -39,15 +41,18 @@ L'ordre de migration doit être guidé par l'**impact business**, pas par la fac
 
 | Priorité | Module | Justification |
 |----------|--------|---------------|
-| 🔴 P0 | **CDR / Consommations** | Problème de performance critique (12 Go), impacte tous les dashboards |
+| 🔴 P0 | **CDR / Consommations** | Pas de `client_id` + 12 Go = JOIN coûteux. Quick wins : `client_id` + `daily_call_summaries` |
 | 🔴 P0 | **Infrastructure** (Docker, CI/CD, monitoring) | Pré-requis technique pour tout le reste |
-| 🟠 P1 | **Facturation / Finance** | Coeur de la valeur business, table `invoices` problématique |
+| 🔴 P0 | **Multi-tenant setup** (stancl/tenancy + BDD centrale) | Pré-requis pour le modèle franchise régional |
+| 🟠 P1 | **Facturation / Finance** | `invoices.doc` JSON blob = cause réelle de la lenteur. Normalisation critique |
 | 🟠 P1 | **Intégrations fournisseurs** | L'isolation des connecteurs réduit les risques d'incidents en cascade |
-| 🟡 P2 | **Catalogue** | Structurant mais moins urgent (fonctionne en V1) |
+| 🟠 P1 | **Sync catalogue + SSO** | Rendre le Hub central opérationnel pour les super-admins |
+| 🟡 P2 | **Catalogue** | Structurant, désormais géré centralement et synchronisé vers les régions |
 | 🟡 P2 | **Gestion clients** | Volume de code important mais moins critique |
 | 🟢 P3 | **Portail client** (Vue 3) | UX importante mais secondaire par rapport au coeur opérationnel |
 | 🟢 P3 | **Portail ambassadeur** | Plus petit périmètre, peut attendre |
 | 🟢 P3 | **Module Environnement** | Non critique pour le business telecom |
+| 🟢 P3 | **Provisioning auto de régions** | Automatisation de la création d'une nouvelle agence régionale |
 
 ### Indicateurs de suivi (KPIs)
 
@@ -75,19 +80,22 @@ L'ordre de migration doit être guidé par l'**impact business**, pas par la fac
 | **Total visible** | **~150-250€/mois** |
 | **Coût caché (risque de panne)** | **Non estimé — potentiellement très élevé** |
 
-### Coûts V2 projetés
+### Coûts V2 projetés (multi-région)
 
 | Poste | Estimation |
 |-------|-----------|
-| Infrastructure Scaleway | ~150-170€/mois |
+| Infrastructure Scaleway (Phase A : serveur unique, multi-BDD) | ~165-200€/mois |
+| Par région supplémentaire (Phase B : serveur dédié) | +50-80€/mois/région |
 | Pusher → Reverb | 0€ (self-hosted) |
 | GitHub Actions CI/CD | 0€ (free tier suffisant) |
 | Sentry (monitoring erreurs) | 0€ (free tier) ou 26€/mois (team) |
+| stancl/tenancy | 0€ (open-source) |
 | Yousign | Inchangé |
 | Laravel Shift (upgrade unique) | ~100€ (one-time) |
-| **Total récurrent** | **~150-200€/mois** |
+| **Total récurrent (Phase A, 1-3 régions)** | **~165-230€/mois** |
+| **Total récurrent (Phase B, 5 régions)** | **~400-500€/mois** |
 
-**Conclusion coûts** : Le passage au cloud est **iso-coût ou légèrement moins cher** que l'hébergement local, avec un niveau de résilience et de service **incomparablement supérieur**. Le vrai gain est dans l'élimination du risque de panne matérielle.
+**Conclusion coûts** : Le passage au cloud multi-région est **comparable** à l'hébergement local pour la Phase A, avec un niveau de résilience **incomparablement supérieur**. La Phase B (5 régions à ~400€/mois) reste très compétitive. Chaque région supplémentaire génère du revenu qui couvre largement les ~50-80€/mois d'infra.
 
 ### Coût de développement
 

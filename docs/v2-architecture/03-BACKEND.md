@@ -11,15 +11,24 @@ C'est le problème structurel n°1. Aujourd'hui :
 - Logique métier probablement dispersée dans les contrôleurs et les composants Livewire
 - Impossible d'exposer des fonctionnalités à un client mobile ou à un partenaire
 
-#### B. Table `calls` non optimisée
-- 12 Go de CDR en accès direct = full table scan sur les requêtes de reporting
-- Pas d'agrégation → chaque dashboard recalcule les totaux en temps réel
-- Impact direct sur l'UX : pages lentes, timeouts potentiels
+#### B. Table `calls` non optimisée (confirmé par schéma)
+- 12 Go de CDR, **pas de `client_id`** → tout JOIN par client passe par `lines`
+- Index existants (`idx_line_date_price`, `uncharged`) sont utiles mais insuffisants
+- La table `monthly_summaries` existe déjà (agrégation par ligne + carbone) mais manque l'agrégation quotidienne et les données financières
+- `cdr_files` assure la traçabilité des imports (idempotence possible via `provider_call_id` UNIQUE)
 
-#### C. Imports non résilients (hypothèse)
+#### C. Table `invoices` = JSON blob (confirmé par schéma)
+- La colonne `invoices.doc` (JSON) contient l'intégralité de chaque facture
+- Les colonnes `date`, `amount`, `paid`, `locked`, `number` sont des GENERATED STORED extraites du JSON
+- Chaque SELECT charge le blob complet → mémoire MySQL saturée
+- La table `invoiced` (polymorphique) lie les éléments facturés aux factures
+- `invoice_cdrs` contient des CDR compressés en MEDIUMBLOB par facture
+
+#### D. Imports non résilients (partiellement confirmé)
 - Imports Transatel toutes les heures, Unyc/Wazo quotidiens
+- `cdr_files` trace les fichiers importés (bon point)
+- `calls.provider_call_id` UNIQUE empêche les doublons CDR (bon point)
 - Sans queue robuste, un import échoué peut passer inaperçu
-- Sans idempotence, un re-run peut créer des doublons
 
 #### D. Laravel 10 → 12
 - Laravel 10 : fin de support sécurité février 2025 (déjà expiré)
@@ -30,12 +39,20 @@ C'est le problème structurel n°1. Aujourd'hui :
 ### A. Couche API REST interne
 
 ```php
-// routes/api.php — Exemple module Client
-Route::prefix('v1')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+// routes/tenant.php — Routes régionales (chargées dans le contexte du tenant)
+Route::prefix('api/v1')->middleware(['tenant', 'auth:sanctum', 'throttle:api'])->group(function () {
     Route::apiResource('clients', ClientController::class);
     Route::apiResource('clients.agencies', AgencyController::class)->scoped();
     Route::apiResource('clients.collaborators', CollaboratorController::class)->scoped();
     Route::apiResource('clients.lines', LineController::class)->scoped();
+});
+
+// routes/central.php — Routes du Hub central uniquement
+Route::prefix('api/v1/central')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::apiResource('regions', RegionController::class);
+    Route::apiResource('catalog/plans', CatalogPlanController::class);
+    Route::post('regions/{tenant}/sync', SyncCatalogController::class);
+    Route::post('regions/{tenant}/sso', SsoController::class);
 });
 ```
 
@@ -218,6 +235,12 @@ class ImportTransatelCDRJob implements ShouldQueue, ShouldBeUnique
             'maxProcesses' => 2,
             'timeout' => 900, // 15 min pour la facturation
         ],
+        'supervisor-tenancy' => [
+            'connection' => 'redis',
+            'queue' => ['tenant-sync', 'tenant-provision'],
+            'maxProcesses' => 2,
+            'timeout' => 300, // 5 min pour sync catalogue
+        ],
     ],
 ],
 ```
@@ -226,6 +249,7 @@ class ImportTransatelCDRJob implements ShouldQueue, ShouldBeUnique
 - `default` + `notifications` : tâches rapides
 - `imports` + `cdr` : imports fournisseurs (potentiellement longs)
 - `billing` + `invoices` : facturation (critique, ne doit pas être bloquée par les imports)
+- `tenant-sync` + `tenant-provision` : synchronisation catalogue central → régions, provisioning nouvelles régions
 
 ### F. Cache stratégique avec Redis
 
@@ -270,6 +294,9 @@ Cache::tags(['catalog'])->flush();
 | Imports fournisseurs cassés pendant migration | Garder les imports existants fonctionnels, migrer vers les nouveaux jobs en parallèle |
 | Performance régression pendant le partitionnement CDR | Faire le partitionnement sur une copie, valider les performances, puis switch |
 | Perte de données CDR pendant l'archivage | Double-write vers agrégation + archive avant de supprimer les détails |
+| Migration `invoices.doc` JSON → normalisé perd des données | Script de migration avec vérification checksums : comparer les totaux JSON vs colonnes normalisées pour chaque facture |
+| Sync catalogue désynchronisée entre régions | Checksums de vérification, logs de sync, retry automatique, alerte si écart |
+| Migrations de schéma désynchronisées entre BDD régionales | CI teste les migrations sur toutes les BDD. `artisan tenants:migrate` atomique |
 
 ---
 
