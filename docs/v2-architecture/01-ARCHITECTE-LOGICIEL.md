@@ -124,7 +124,7 @@ Règles complémentaires :
 1. **Chaque module possède ses propres migrations** (préfixées par module)
 2. **API Resources** systématiques — chaque module expose ses données via des Resources JSON
 3. **La logique métier vit dans Domain/** — les entités savent se valider, calculer leurs états, vérifier leurs invariants
-4. **L'infrastructure est interchangeable** — le jour où on change de driver (ex: Meilisearch → Typesense), seul `Infrastructure/` est impacté
+4. **L'infrastructure est interchangeable** — le jour où on change de driver (ex: Scout database → Meilisearch), seul `Infrastructure/` est impacté
 
 ### Pattern API-first
 
@@ -132,25 +132,26 @@ Règles complémentaires :
 ┌─────────────────────────────────────────────────────┐
 │                   Laravel 12                         │
 │                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-│  │ Livewire │  │ Inertia  │  │   API REST       │  │
-│  │ (Admin)  │  │ (Client) │  │ /api/v1/*        │  │
-│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
-│       │              │                 │             │
-│       ▼              ▼                 ▼             │
+│  ┌──────────────────────┐  ┌──────────────────┐    │
+│  │     Livewire 3       │  │   API REST       │    │
+│  │ (Admin + Client +    │  │   /api/v1/*      │    │
+│  │  Ambassadeur)        │  │   (mobile, etc.) │    │
+│  └──────────┬───────────┘  └────────┬─────────┘    │
+│             │                       │               │
+│             ▼                       ▼               │
 │  ┌──────────────────────────────────────────────┐   │
 │  │         Couche Services / Actions             │   │
 │  │         (logique métier partagée)             │   │
 │  └──────────────────────────────────────────────┘   │
-│       │              │                 │             │
-│       ▼              ▼                 ▼             │
+│             │                       │               │
+│             ▼                       ▼               │
 │  ┌──────────────────────────────────────────────┐   │
 │  │              Repositories / Models            │   │
 │  └──────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────┘
 ```
 
-**Principe clé** : Livewire et Inertia appellent les mêmes Services/Actions. La logique métier n'est jamais dans un contrôleur ou un composant Livewire.
+**Principe clé** : Les composants Livewire et l'API REST appellent les mêmes Services/Actions. La logique métier n'est jamais dans un contrôleur ou un composant Livewire.
 
 ## 3. Stratégie pour la table `calls` (CDR)
 
@@ -268,7 +269,7 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 > **Priorisation** :
 > - Court terme (0-3 mois) : Dockerisation, CI/CD, quick wins CDR (`client_id` + agrégation), Redis, Laravel 12, **install stancl/tenancy + BDD centrale**
 > - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 3, **sync catalogue + SSO**
-> - Long terme (6-12 mois) : Portails Vue 3, migration cloud, **provisioning auto de régions**, scaling
+> - Long terme (6-12 mois) : Portails client/amba Livewire 3, migration cloud, **provisioning auto de régions**, scaling
 
 ---
 

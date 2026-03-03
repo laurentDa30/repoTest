@@ -53,24 +53,24 @@
                                   │          │           │
                ┌──────────────────┼──────────┼───────────┼───────────┐
                │                  │          │           │           │
-      ┌────────▼────────┐ ┌──────▼───┐ ┌────▼─────┐ ┌──▼────────┐  │
-      │ MySQL 8 Managé  │ │ Redis 7  │ │Meilisearch│ │  S3       │  │
-      │ (DB-DEV2-M)     │ │ Managé   │ │          │ │  Object   │  │
-      │                 │ │ Cache    │ │ Recherche│ │  Storage  │  │
-      │ Databases:      │ │ Sessions │ │ clients  │ │           │  │
-      │ ├ cekoya_central│ │ Queues   │ │ lignes   │ │ Par région│  │
-      │ │  └ tenants    │ │ Rate     │ │ catalogue│ │ /idf/     │  │
-      │ │  └ catalog    │ │ limiting │ │(par      │ │ /paca/    │  │
-      │ │  └ regional_  │ │          │ │ tenant)  │ │ /lyon/    │  │
-      │ │    summaries  │ │          │ │          │ │           │  │
-      │ ├ cekoya_idf    │ │          │ │          │ │ Factures  │  │
-      │ │  └ calls      │ │          │ │          │ │ Documents │  │
-      │ │  └ invoices   │ │          │ │          │ │ Exports   │  │
-      │ │  └ clients    │ │          │ │          │ │ CDR arch. │  │
-      │ │  └ daily_sum  │ │          │ │          │ │ Backups   │  │
-      │ ├ cekoya_paca   │ │          │ │          │ │           │  │
-      │ └ cekoya_lyon   │ │          │ │          │ │           │  │
-      └─────────────────┘ └──────────┘ └──────────┘ └───────────┘  │
+      ┌────────▼────────┐ ┌──────▼───┐ ┌──▼────────┐               │
+      │ MySQL 8 Managé  │ │ Redis 7  │ │  S3       │               │
+      │ (DB-DEV2-M)     │ │ Managé   │ │  Object   │               │
+      │                 │ │ Cache    │ │  Storage  │               │
+      │ Databases:      │ │ Sessions │ │           │               │
+      │ ├ cekoya_central│ │ Queues   │ │ Par région│               │
+      │ │  └ tenants    │ │ Rate     │ │ /idf/     │               │
+      │ │  └ catalog    │ │ limiting │ │ /paca/    │               │
+      │ │  └ regional_  │ │          │ │ /lyon/    │               │
+      │ │    summaries  │ │          │ │           │               │
+      │ ├ cekoya_idf    │ │ Search:  │ │ Factures  │               │
+      │ │  └ calls      │ │ Scout +  │ │ Documents │               │
+      │ │  └ invoices   │ │ database │ │ Exports   │               │
+      │ │  └ clients    │ │ driver   │ │ CDR arch. │               │
+      │ │  └ daily_sum  │ │ (par     │ │ Backups   │               │
+      │ ├ cekoya_paca   │ │  tenant) │ │           │               │
+      │ └ cekoya_lyon   │ │          │ │           │               │
+      └─────────────────┘ └──────────┘ └───────────┘               │
                │                                                     │
                │              VPC PRIVÉ (non exposé internet)         │
                └─────────────────────────────────────────────────────┘
@@ -86,11 +86,11 @@
 ### Routing des portails (multi-région)
 
 ```
-central.cekoya.fr            ──► Hub Central (Livewire 3) ──► MW: super_admin + MFA
-{region}.cekoya.fr           ──► Admin régional (Livewire) ──► MW: tenant + admin + MFA
-{region}-client.cekoya.fr    ──► Portail client (Inertia)  ──► MW: tenant + client auth
-{region}-amba.cekoya.fr      ──► Portail ambass. (Inertia) ──► MW: tenant + ambassador auth
-api.cekoya.fr                ──► Laravel API REST          ──► MW: Sanctum + throttle + tenant
+central.cekoya.fr            ──► Hub Central (Livewire 3)    ──► MW: super_admin + MFA
+{region}.cekoya.fr           ──► Admin régional (Livewire 3) ──► MW: tenant + admin + MFA
+{region}-client.cekoya.fr    ──► Portail client (Livewire 3) ──► MW: tenant + client auth
+{region}-amba.cekoya.fr      ──► Portail ambass. (Livewire 3)──► MW: tenant + ambassador auth
+api.cekoya.fr                ──► Laravel API REST             ──► MW: Sanctum + throttle + tenant
 ```
 
 Même application Laravel, **routage par domaine** (stancl/tenancy identifie le tenant via le sous-domaine, switch la BDD automatiquement).
@@ -110,7 +110,7 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 | Queues | Laravel Horizon + Redis | Natif |
 | WebSocket | Laravel Reverb | Natif (remplace Pusher) |
 | Scheduler | Laravel Scheduler | Natif |
-| Search | Laravel Scout + Meilisearch | Natif |
+| Search | Laravel Scout + database driver | Natif (zéro service tiers) |
 | Audit | spatie/laravel-activitylog | ^4.0 |
 | Monitoring | Laravel Pulse | Natif |
 | Tests | Pest PHP | ^3.0 |
@@ -118,13 +118,13 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 | Code style | Laravel Pint | Natif |
 | Architecture | Monolithe modulaire DDD-lite | Domain/Application/Infrastructure |
 
-### Frontend
+### Frontend (stack unifiée)
 | Composant | Technologie | Portail |
 |-----------|------------|---------|
 | Hub central | Livewire 3 + Alpine.js | central.cekoya.fr |
 | Admin régional | Livewire 3 + Alpine.js | {region}.cekoya.fr |
-| Client UI | Inertia.js + Vue 3 | {region}-client.cekoya.fr |
-| Ambassador UI | Inertia.js + Vue 3 | {region}-amba.cekoya.fr |
+| Client UI | Livewire 3 + Alpine.js | {region}-client.cekoya.fr |
+| Ambassador UI | Livewire 3 + Alpine.js | {region}-amba.cekoya.fr |
 | CSS Framework | Tailwind CSS 4 | Tous |
 | Charts | ApexCharts | Tous |
 | Build tool | Vite | Tous |
@@ -137,7 +137,7 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 | Reverse proxy | Nginx |
 | DB | MySQL 8.0 Managé (DB-DEV2-M, multi-BDD) |
 | Cache/Queue | Redis 7 Managé |
-| Search | Meilisearch |
+| Search | Laravel Scout (database driver, via Redis) |
 | Object Storage | Scaleway S3 (isolé par région) |
 | CI/CD | GitHub Actions |
 | DNS/WAF/CDN | Cloudflare (wildcard *.cekoya.fr) |
@@ -178,7 +178,7 @@ PHASE C — Full scaling (10+ régions)
 | CDR queries (par région) | > 5M records actifs | `client_id` dénormalisé + agrégation + partitionnement |
 | Import Transatel horaire | > 100K CDR/batch | Batch processing parallélisé |
 | Facturation mensuelle | > 1000 factures simultanées | Queue billing dédiée + génération PDF async |
-| Recherche clients/lignes | > 50K entités par région | Meilisearch (index par tenant) |
+| Recherche clients/lignes | > 50K entités par région | Scout + database driver (index par tenant) |
 | Sessions concurrentes | > 100 simultanées (toutes régions) | Redis sessions (déjà prévu) |
 | Sync catalogue vers N régions | > 10 régions | Queue tenant-sync + batch sync parallélisé |
 | MySQL unique saturé | > 5 BDD régionales actives | Passage Phase B (MySQL par région) |
@@ -354,7 +354,7 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 | API REST interne v1 | Routes tenant + routes centrales (voir 03-BACKEND) | 5-7 jours |
 | Module Integration (refacto) | Pattern Gateway pour Transatel, Unyc, Wazo | 5-7 jours |
 | Sync catalogue + SSO | Hub → régions via queue tenant-sync | 3-5 jours |
-| Meilisearch | Indexation par tenant (clients, lignes, catalogue) | 2-3 jours |
+| Laravel Scout | Config database driver par tenant (clients, lignes, catalogue) | 1-2 jours |
 | Laravel Reverb | Remplacement Pusher | 1-2 jours |
 | Migration cloud staging | Staging Scaleway multi-BDD | 2-3 jours |
 
@@ -388,8 +388,8 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Portail client Vue 3 | Dashboard, lignes, consommation, factures (scopé par tenant) | 10-15 jours |
-| Portail ambassadeur Vue 3 | Dashboard, paiements, historique (scopé par tenant) | 5-7 jours |
+| Portail client Livewire 3 | Dashboard, lignes, consommation, factures (scopé par tenant) | 7-10 jours |
+| Portail ambassadeur Livewire 3 | Dashboard, paiements, historique (scopé par tenant) | 3-5 jours |
 | Dashboard Hub central | Vue synthétique multi-régions + SSO | 3-5 jours |
 | Suppression Bootstrap | Migration Tailwind complète | 3-5 jours |
 | Module Environnement (refacto) | RSE, émissions, captation | 3-5 jours |
@@ -430,8 +430,8 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 ┌──────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────────┐
 │ 🔴 CRITIQUE              │ │ 🟠 IMPORTANT             │ │ 🟡 VALEUR AJOUTÉE        │ │ 🟢 CONSOLIDATION         │
 │                          │ │                          │ │                          │ │                          │
-│ ✓ Docker + CI/CD         │ │ ✓ Modules DDD-lite       │ │ ✓ Portail client Vue 3   │ │ ✓ Documentation complète │
-│ ✓ Laravel 12 upgrade     │ │   (Domain/App/Infra)     │ │ ✓ Portail ambass. Vue 3  │ │ ✓ Pen test (cross-tenant)│
+│ ✓ Docker + CI/CD         │ │ ✓ Modules DDD-lite       │ │ ✓ Portail client LW3     │ │ ✓ Documentation complète │
+│ ✓ Laravel 12 upgrade     │ │   (Domain/App/Infra)     │ │ ✓ Portail ambass. LW3    │ │ ✓ Pen test (cross-tenant)│
 │ ✓ stancl/tenancy setup   │ │ ✓ Refonte invoices       │ │ ✓ Dashboard Hub central  │ │ ✓ Tests E2E              │
 │ ✓ Redis (cache+queues)   │ │   (sortie JSON blob)     │ │ ✓ Suppression Bootstrap  │ │ ✓ Provisioning auto      │
 │ ✓ Monitoring (Pulse+     │ │ ✓ Livewire 3 complet     │ │ ✓ Module Environnement   │ │   de régions             │
@@ -441,7 +441,7 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 │ ✓ API interne v1         │ │ ✓ Provisioning 2è région │ │                          │ │                          │
 │ ✓ Audit trail            │ │                          │ │                          │ │                          │
 │ ✓ Pattern Gateway        │ │                          │ │                          │ │                          │
-│ ✓ Meilisearch            │ │                          │ │                          │ │                          │
+│ ✓ Scout (database drv.)  │ │                          │ │                          │ │                          │
 │ ✓ Reverb (bye Pusher)    │ │                          │ │                          │ │                          │
 │ ✓ Staging cloud          │ │                          │ │                          │ │                          │
 │                          │ │                          │ │                          │ │                          │
@@ -481,7 +481,7 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 - [ ] Sync catalogue Hub → régions testée et validée
 - [ ] Provisioning d'une nouvelle région documenté et testé
 - [ ] Backups par BDD régionale automatisés
-- [ ] Meilisearch indexe par tenant
+- [ ] Scout database driver fonctionne par tenant
 
 ### Documentation
 - [ ] Documentation API (OpenAPI) à jour (routes tenant + centrales)

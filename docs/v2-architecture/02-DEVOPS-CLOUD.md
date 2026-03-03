@@ -324,8 +324,8 @@ jobs:
 ### 2. Le worker doit être séparé
 > Validé. Le worker (Laravel Horizon pour les queues + scheduler) **ne doit pas** tourner sur les mêmes instances que l'app web. Les imports Transatel horaires et l'agrégation CDR nocturne ne doivent pas impacter les performances web.
 
-### 3. Meilisearch manquant dans l'infra
-> Ajouter une instance Meilisearch dédiée ou utiliser le service managé Scaleway si disponible. Budget additionnel : ~10-15€/mois.
+### 3. Recherche — Laravel Scout avec database driver
+> Pas besoin de service tiers (Meilisearch, Elasticsearch). Laravel Scout avec le database driver utilise MySQL directement (FULLTEXT ou LIKE). Zéro coût additionnel, zéro service à maintenir. Si la volumétrie l'exige un jour (> 100K entités par tenant), on pourra passer à Meilisearch — le changement est transparent grâce à l'abstraction Scout.
 
 ### 4. Monitoring à préciser
 > La proposition de monitoring est dans le document dédié, mais les agents de collecte (Prometheus/Grafana ou Scaleway Cockpit) doivent être budgétés dans l'infra.
