@@ -87,7 +87,7 @@ L'ordre de migration doit être guidé par l'**impact business**, pas par la fac
 | Infrastructure Scaleway (Phase A : serveur unique, multi-BDD) | ~165-200€/mois |
 | Par région supplémentaire (Phase B : serveur dédié) | +50-80€/mois/région |
 | Pusher → Reverb | 0€ (self-hosted) |
-| GitHub Actions CI/CD | 0€ (free tier suffisant) |
+| GitLab CI/CD | 0€ (400 min/mois inclus) |
 | Sentry (monitoring erreurs) | 0€ (free tier) ou 26€/mois (team) |
 | stancl/tenancy | 0€ (open-source) |
 | Yousign | Inchangé |

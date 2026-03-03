@@ -46,7 +46,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 | Signature | Yousign (existant) | Maintien |
 | Stockage fichiers | S3-compatible (Scaleway Object Storage) | Factures PDF, documents, exports |
 | Monitoring | Laravel Pulse + Sentry + Grafana | Observabilité complète |
-| CI/CD | GitHub Actions | Déjà sur GitHub |
+| CI/CD | GitLab CI | Déjà sur GitLab |
 | Conteneurisation | Docker + Docker Compose | Reproductibilité, pré-requis cloud |
 | Hébergement | Scaleway (Paris) | Souveraineté FR, RGPD, coût maîtrisé |
 
@@ -86,7 +86,7 @@ Le lien `calls.cdr_file_id` permet l'idempotence et la traçabilité.
 
 ### Dette technique : tables `_bkp` et double système de tarification
 
-Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` indiquent une migration partielle de la tarification. À finaliser et nettoyer.
+Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` correspondent à une **migration de la tarification en cours**. Le nouveau système (`plan_rates` normalisé) est en train de remplacer l'ancien (`pricing_zones` dénormalisé). Les tables `_bkp` sont des sauvegardes de sécurité de cette transition. Une fois la migration confirmée stable, ces tables pourront être supprimées.
 
 ---
 

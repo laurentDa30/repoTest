@@ -324,29 +324,29 @@ Facture 1 client avec 200 lignes :
 4. Les colonnes GENERATED sont un workaround, pas une solution — elles consomment de l'espace en double
 5. Les index sur les colonnes GENERATED fonctionnent mais MySQL doit maintenir le JSON + les colonnes extraites
 
-### 4.2 Double système de tarification
+### 4.2 Migration de la tarification (en cours)
 
 ```
-Ancien système (dénormalisé) :
+Ancien système (dénormalisé) — en cours de remplacement :
   pricing_zones          → colonnes matrix mobile_to_0..3, fixed_to_0..3, sms_to_0..3, etc.
   pricing_geographical_zone
   pricing_zone_country
 
-Nouveau système (normalisé) :
+Nouveau système (normalisé) — cible :
   plan_rates             → (plan_id, service_type, from_zone, to_zone, unit_price, allowance)
   supplier_zone_countries
 
-Tables backup :
+Tables backup (sauvegardes de sécurité) :
   plan_rates_bkp
   geographical_zone_supplier_bkp
   supplier_zone_countries_bkp
 ```
 
-**Constat** : Une migration de la tarification est en cours ou a été faite partiellement. Les deux systèmes coexistent. Les tables `_bkp` confirment que la migration a été faite manuellement avec des sauvegardes de sécurité.
+**Constat** : La migration de la tarification vers le nouveau système normalisé (`plan_rates`) est **déjà en cours**. Les tables `_bkp` sont des sauvegardes de sécurité de cette transition. Ce n'est pas une dette technique à résoudre — c'est une migration pilotée par l'équipe.
 
-**Action V2** : Finaliser la migration vers `plan_rates` (normalisé), supprimer les tables `pricing_zones` et `_bkp` une fois confirmé que le nouveau système est stable.
+**Action V2** : Attendre que la migration soit confirmée stable, puis supprimer les tables `pricing_zones` et `_bkp` si l'équipe le valide.
 
-### 4.3 Table `collaborators` isolée du système `users`
+### 4.3 Table `collaborators` = module infogérance
 
 ```sql
 -- collaborators : entités distinctes des users
@@ -356,7 +356,9 @@ CREATE TABLE `collaborators` (
 );
 ```
 
-Les collaborateurs (employés des clients) ne sont **pas** des `users`. Ils n'ont pas de compte de connexion. C'est un choix correct si les collaborateurs ne se connectent jamais au portail. Mais attention : si un collaborateur doit un jour accéder au portail client, il faudra créer un lien `collaborators ↔ users`.
+Les collaborateurs sont des **contacts gérés dans le cadre de l'infogérance** pour les clients. Ils ne sont **pas** des utilisateurs de la plateforme et n'ont pas de compte de connexion. C'est une gestion purement interne du parc informatique client (lien avec GLPI via `id_glpi`).
+
+**En V2** : Les collaborateurs restent dans un module dédié (Infogérance ou Client). Aucun lien `collaborators ↔ users` n'est nécessaire sauf si un besoin d'accès portail client émerge à l'avenir.
 
 ### 4.4 La table `users` est multi-rôle
 
@@ -577,10 +579,12 @@ CREATE TABLE `invoice_lines` (
 - `invoice_lines` : requêtable, indexable, analysable
 - Les dashboards financiers deviennent instantanés
 
-### Phase 2 bis — Nettoyage de la tarification
+### Phase 2 bis — Finalisation de la migration tarification (en cours)
+
+La migration vers `plan_rates` (normalisé) est déjà en cours côté équipe. Une fois confirmée stable :
 
 ```sql
--- Une fois plan_rates confirmé comme source de vérité :
+-- Quand l'équipe valide que plan_rates est la source de vérité :
 DROP TABLE IF EXISTS pricing_zones;
 DROP TABLE IF EXISTS pricing_geographical_zone;
 DROP TABLE IF EXISTS pricing_zone_country;
@@ -589,7 +593,7 @@ DROP TABLE IF EXISTS geographical_zone_supplier_bkp;
 DROP TABLE IF EXISTS supplier_zone_countries_bkp;
 ```
 
-**Pré-requis** : Vérifier que tout le code utilise `plan_rates` et plus `pricing_zones`.
+**Pré-requis** : Confirmation par l'équipe que tout le code utilise `plan_rates` et plus `pricing_zones`.
 
 ### Phase 3 — Optimisations secondaires
 
@@ -680,7 +684,7 @@ La table `sims` a `client_id` et `line_id` mais pas de lien direct vers `collabo
 | 🔴 P0 | Créer `daily_call_summaries` + job | Dashboards rapides | 2 jours | Faible |
 | 🔴 P1 | Archivage CDR > 12 mois | Taille table `calls` | 2 jours | Moyen |
 | 🟠 P1 | Refonte `invoices` (sortie du JSON blob) | Performance facturation | 5-7 jours | Élevé (migration données) |
-| 🟡 P2 | Nettoyage tables `_bkp` | Dette technique | 0.5 jour | Faible |
-| 🟡 P2 | Nettoyage double système tarification | Maintenabilité | 2 jours | Moyen |
+| 🟡 P2 | Suppression tables `_bkp` (après validation équipe) | Propreté | 0.5 jour | Faible |
+| 🟡 P2 | Finaliser migration tarification (déjà en cours) | Maintenabilité | À confirmer | Faible (migration pilotée) |
 | 🟡 P2 | Enrichir `monthly_summaries` (client_id, financier) | Reporting | 1 jour | Faible |
 | 🟢 P3 | Refonte `devis` (sortie du JSON) | Cohérence | 2-3 jours | Moyen |

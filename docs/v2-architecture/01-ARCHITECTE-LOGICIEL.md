@@ -262,7 +262,7 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 3. **Le partitionnement CDR doit être automatisé** — création automatique des partitions mensuelles futures via un job planifié
 4. **Prévoir un module Integration dédié** — les connecteurs fournisseurs doivent être isolés derrière des interfaces pour pouvoir ajouter/remplacer un fournisseur sans impacter le métier
 5. **L'architecture multi-région doit être pensée dès le début** — les données de référence (catalogue, tarifs) sont centrales ; les données opérationnelles (clients, CDR, factures) sont régionales. Tout le code métier doit être agnostique de la région courante (le switch de BDD est transparent via stancl/tenancy)
-6. **Nettoyer la dette technique BDD** — supprimer les tables `_bkp` (`plan_rates_bkp`, `geographical_zone_supplier_bkp`, `supplier_zone_countries_bkp`) et finaliser la migration vers `plan_rates` (normalisé) en remplacement de `pricing_zones` (dénormalisé)
+6. **Finaliser la migration de tarification** — la migration vers `plan_rates` (normalisé) en remplacement de `pricing_zones` (dénormalisé) est déjà en cours. Les tables `_bkp` sont des sauvegardes de sécurité de cette transition et pourront être supprimées une fois la migration confirmée stable
 
 ---
 

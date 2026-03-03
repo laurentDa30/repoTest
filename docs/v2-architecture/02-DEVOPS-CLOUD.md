@@ -132,13 +132,6 @@ services:
     ports:
       - "6379:6379"
 
-  meilisearch:
-    image: getmeili/meilisearch:latest
-    volumes:
-      - meilisearch_data:/meili_data
-    ports:
-      - "7700:7700"
-
   mailpit:
     image: axllent/mailpit
     ports:
@@ -147,7 +140,6 @@ services:
 
 volumes:
   mysql_data:
-  meilisearch_data:
 ```
 
 ### Dockerfile de production
@@ -184,94 +176,79 @@ EXPOSE 80
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
 ```
 
-## 4. CI/CD — GitHub Actions
+## 4. CI/CD — GitLab CI
 
 ```yaml
-# .github/workflows/ci.yml
-name: CI/CD Pipeline
+# .gitlab-ci.yml
+stages:
+  - test
+  - build
+  - deploy
 
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+variables:
+  MYSQL_DATABASE: cekoya_test
+  MYSQL_ROOT_PASSWORD: password
 
-jobs:
-  tests:
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_DATABASE: cekoya_test
-          MYSQL_ROOT_PASSWORD: password
-        ports: ['3306:3306']
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
+# --- Tests ---
+tests:
+  stage: test
+  image: php:8.3-cli
+  services:
+    - mysql:8.0
+    - redis:7-alpine
+  before_script:
+    - apt-get update && apt-get install -y git unzip libzip-dev
+    - docker-php-ext-install pdo_mysql pcntl zip
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - composer install --prefer-dist --no-progress
+  script:
+    - php artisan test --parallel
+    - ./vendor/bin/phpstan analyse
+    - ./vendor/bin/pint --test
+  only:
+    - main
+    - develop
+    - merge_requests
 
-    steps:
-      - uses: actions/checkout@v4
+# --- Build & Push Docker ---
+build-staging:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t registry.scw.cloud/cekoya/app:staging -f docker/Dockerfile .
+    - docker push registry.scw.cloud/cekoya/app:staging
+  only:
+    - develop
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, redis, pcntl
-          coverage: xdebug
+build-production:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t registry.scw.cloud/cekoya/app:$CI_COMMIT_SHA -f docker/Dockerfile .
+    - docker push registry.scw.cloud/cekoya/app:$CI_COMMIT_SHA
+  only:
+    - main
 
-      - name: Install dependencies
-        run: composer install --prefer-dist --no-progress
+# --- Deploy ---
+deploy-staging:
+  stage: deploy
+  script:
+    - echo "Deploy to staging environment"
+    # SSH deploy ou appel API Scaleway
+  only:
+    - develop
 
-      - name: Run tests
-        run: php artisan test --parallel
-        env:
-          DB_CONNECTION: mysql
-          DB_HOST: 127.0.0.1
-          DB_DATABASE: cekoya_test
-          DB_USERNAME: root
-          DB_PASSWORD: password
-
-      - name: Run static analysis
-        run: ./vendor/bin/phpstan analyse
-
-      - name: Run code style check
-        run: ./vendor/bin/pint --test
-
-  deploy-staging:
-    needs: tests
-    if: github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build & Push Docker image
-        run: |
-          docker build -t registry.scw.cloud/cekoya/app:staging -f docker/Dockerfile .
-          docker push registry.scw.cloud/cekoya/app:staging
-      - name: Deploy to staging
-        run: |
-          # SSH deploy or Scaleway API call
-          echo "Deploy to staging environment"
-
-  deploy-production:
-    needs: tests
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production  # Requires manual approval
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build & Push Docker image
-        run: |
-          docker build -t registry.scw.cloud/cekoya/app:${{ github.sha }} -f docker/Dockerfile .
-          docker push registry.scw.cloud/cekoya/app:${{ github.sha }}
-      - name: Deploy to production
-        run: |
-          echo "Blue-green deploy to production"
+deploy-production:
+  stage: deploy
+  script:
+    - echo "Blue-green deploy to production"
+  when: manual  # Approbation manuelle requise
+  only:
+    - main
 ```
 
 ### Stratégie de déploiement

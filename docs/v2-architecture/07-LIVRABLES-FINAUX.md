@@ -139,7 +139,7 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 | Cache/Queue | Redis 7 Managé |
 | Search | Laravel Scout (database driver, via Redis) |
 | Object Storage | Scaleway S3 (isolé par région) |
-| CI/CD | GitHub Actions |
+| CI/CD | GitLab CI |
 | DNS/WAF/CDN | Cloudflare (wildcard *.cekoya.fr) |
 | Monitoring | Laravel Pulse + Sentry + Scaleway Cockpit |
 | Secrets | Scaleway Secret Manager (par tenant) |
@@ -327,7 +327,7 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 | Tâche | Détail | Durée |
 |-------|--------|-------|
 | Docker + Docker Compose | Conteneuriser l'app existante V1 | 2-3 jours |
-| CI/CD GitHub Actions | Pipeline tests + lint + deploy staging | 2-3 jours |
+| CI/CD GitLab CI | Pipeline tests + lint + deploy staging | 2-3 jours |
 | Tests de base | Tests sur les flux critiques (import, facturation) | 3-5 jours |
 | Laravel 10 → 11 → 12 | Via Laravel Shift + ajustements manuels | 2-3 jours |
 | Livewire 2 → 3 (début) | Coexistence, migration composants simples | 3-5 jours |
