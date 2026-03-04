@@ -121,14 +121,12 @@ Chaque région a **sa propre copie complète** de ces tables. Les données ne se
 📁 Clients & Relations
 ├── clients                        -- Clients de la région
 ├── client_user                    -- Utilisateurs portail ↔ clients
-├── client_collaborator            -- Collaborateurs ↔ clients
 ├── client_todos / client_todo_messages
 ├── client_preferences
 ├── client_plan_preferences
 ├── client_device_sheet
 ├── client_project_carbon
 ├── client_orders
-├── collaborators                  -- Employés des clients de la région
 ├── referents                      -- Contacts référents
 ├── groups / sub_groups            -- Agences/départements
 ├── addresses / address_book_entries
@@ -142,13 +140,24 @@ Chaque région a **sa propre copie complète** de ces tables. Les données ne se
 ├── mobile_plan_buyings
 └── alerts
 
-📁 CDR / Consommations
-├── calls                          -- CDR de la région uniquement !
-├── cdr_files
-├── monthly_summaries
-├── daily_call_summaries           -- (NOUVEAU V2)
+📁 CDR / Consommations (séparés par type)
+├── calls_mobile                   -- CDR mobile/fixe/internet (ex-calls) (RENOMMÉ V2)
+├── calls_iot                      -- CDR IoT séparés (volume massif) (NOUVEAU V2)
+├── calls_ucaas                    -- CDR Wazo (VoIP, conférence) (NOUVEAU V2)
+├── cdr_files                      -- Fichiers CDR importés (tous types)
+├── daily_call_summaries           -- Agrégation quotidienne mobile/fixe (NOUVEAU V2)
+├── daily_iot_summaries            -- Agrégation quotidienne IoT (NOUVEAU V2)
+├── daily_ucaas_summaries          -- Agrégation quotidienne Wazo (NOUVEAU V2)
+├── monthly_summaries              -- Agrégation mensuelle (existante, à enrichir)
+├── monthly_iot_summaries          -- Agrégation mensuelle IoT (NOUVEAU V2)
+├── monthly_ucaas_summaries        -- Agrégation mensuelle UCaaS (NOUVEAU V2)
 ├── carbon_summaries
 └── invoice_cdrs
+
+📁 Infogérance
+├── collaborators                  -- Employés des clients (parc informatique)
+├── client_collaborator            -- Pivot collaborateurs ↔ clients
+└── device_collaborator            -- Affectation appareil ↔ collaborateur
 
 📁 Facturation
 ├── invoices (→ invoices_v2)       -- Factures de la région

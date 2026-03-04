@@ -77,14 +77,17 @@ app/
 │   │   │   └── Providers/        # ServiceProvider du module (bindings)
 │   │   └── routes.php
 │   │
-│   ├── Client/             # Clients, agences, collaborateurs
-│   ├── Telecom/            # Lignes, SIMs, portabilités, appareils
+│   ├── Client/             # Clients, agences, référents, préférences
+│   ├── Telecom/            # Lignes mobile/fixe/internet, SIMs, portabilités
+│   ├── IoT/                # SIMs IoT, quotas spécifiques, CDR IoT séparés
+│   ├── UCaaS/              # Wazo : communications unifiées, VoIP, collaboration
+│   ├── Infogerance/        # Collaborateurs clients, parc informatique, GLPI
 │   ├── Catalog/            # Matériels, services, forfaits, fournisseurs
 │   ├── Ticket/             # Tickets support, SAV, demandes (messages, catégories, labels, todos)
 │   ├── Order/              # Commandes fournisseur/client, suivi, transit (s'appuie sur le module Ticket)
-│   ├── Billing/            # Facturation, comptabilité, SEPA
-│   ├── CDR/                # Consommations (table partitionnée)
-│   ├── Stock/              # Gestion stock, SIMs physiques
+│   ├── Billing/            # Facturation unifiée, comptabilité, SEPA (collecte les lignes de tous les modules)
+│   ├── CDR/                # Consommations — stockage et agrégation (partitionné par type : mobile, IoT, UCaaS)
+│   ├── Stock/              # Gestion stock, SIMs physiques, appareils
 │   ├── Integration/        # Connecteurs fournisseurs (Transatel, Unyc, Wazo, IELO, euroFIBER)
 │   ├── Ambassador/         # Programme ambassadeur, paiements
 │   ├── Environment/        # Module RSE, émissions, captation
@@ -98,10 +101,100 @@ app/
 │   ├── Traits/
 │   ├── ValueObjects/
 │   ├── Contracts/          # Interfaces inter-modules
+│   │   └── Billable.php    # Contrat de facturation (tout module facturable l'implémente)
 │   └── DTOs/
 ```
 
 > **Note multi-région** : Les modules ci-dessus s'exécutent dans chaque instance régionale. Le module `Central/` ne tourne que sur le Hub et gère la synchronisation catalogue, le registry des régions et le SSO.
+
+### Séparation des domaines métier : Telecom vs IoT vs UCaaS vs Infogérance
+
+**Pourquoi séparer ?**
+
+| Aspect | Telecom (mobile/fixe/internet) | IoT | UCaaS (Wazo) | Infogérance |
+|--------|-------------------------------|-----|-------------|-------------|
+| Volume CDR | Moyen (~500K/mois) | Très élevé (~millions/mois) | Variable | Aucun CDR |
+| Type de conso | Voix, SMS, data, MMS | Data quasi-exclusivement | VoIP, conférence, messaging | N/A |
+| Quotas | Forfaits classiques | Quotas data très bas, alertes spécifiques | Minutes VoIP, postes | N/A |
+| Fournisseur | Transatel, Unyc | Transatel (SIMs M2M) | Wazo | GLPI, interne |
+| Facturation | Lignes de facture telecom | Lignes de facture IoT | Lignes de facture UCaaS | Lignes de facture infogérance |
+
+**Ce qui les unit** : la facture client. Un client peut avoir des lignes mobile + des SIMs IoT + des postes Wazo + de l'infogérance, tout sur **une seule facture**.
+
+**La solution** : le contrat `Billable` (interface partagée).
+
+```php
+// app/Shared/Contracts/Billable.php
+interface Billable
+{
+    /**
+     * Retourne les lignes de facturation pour une période donnée.
+     * Chaque module facturable implémente cette interface.
+     */
+    public function getInvoiceLines(Client $client, CarbonPeriod $period): Collection;
+}
+
+// Chaque module implémente Billable :
+// - Telecom\Application\Services\TelecomBillingService implements Billable
+// - IoT\Application\Services\IoTBillingService implements Billable
+// - UCaaS\Application\Services\UCaaSBillingService implements Billable
+// - Infogerance\Application\Services\InfogeranceBillingService implements Billable
+
+// Le module Billing collecte toutes les lignes :
+class GenerateInvoiceAction
+{
+    public function __construct(
+        private readonly array $billableServices // Injecté via ServiceProvider
+    ) {}
+
+    public function execute(Client $client, CarbonPeriod $period): Invoice
+    {
+        $invoiceLines = collect();
+
+        foreach ($this->billableServices as $service) {
+            $invoiceLines = $invoiceLines->merge(
+                $service->getInvoiceLines($client, $period)
+            );
+        }
+
+        // Trier par type (telecom, IoT, UCaaS, infogérance)
+        // Calculer les totaux
+        // Générer la facture
+    }
+}
+```
+
+**Avantage** : chaque module gère ses propres données et sa propre logique de calcul. Le module Billing ne connaît pas les détails — il collecte des lignes de facture via l'interface. Ajouter un nouveau domaine facturable = implémenter `Billable`, zéro modification du module Billing.
+
+### Séparation des CDR par type
+
+Le module **CDR** reste centralisé (un seul module gère le stockage et l'agrégation), mais les données sont **partitionnées par type** pour éviter que les volumes IoT polluent les requêtes telecom.
+
+```sql
+-- Option A : Tables séparées (recommandé — plus simple, plus performant)
+calls_mobile       -- CDR mobile/fixe/internet (Transatel, Unyc)
+calls_iot          -- CDR IoT (Transatel M2M) — volume massif
+calls_ucaas        -- CDR Wazo (VoIP, conférence)
+
+-- Chaque table a la même structure de base (colonnes communes)
+-- + colonnes spécifiques au type
+
+-- Les tables d'agrégation sont aussi séparées :
+daily_call_summaries          -- Agrégation mobile/fixe/internet
+daily_iot_summaries           -- Agrégation IoT (par SIM, par quota)
+daily_ucaas_summaries         -- Agrégation Wazo (par poste, par type d'appel)
+
+-- Option B : Table unique partitionnée par telecom_type_id
+-- (plus simple en code, mais les volumes IoT ralentissent les requêtes mobile)
+-- → NON RECOMMANDÉ si le volume IoT est significatif
+```
+
+**Pourquoi des tables séparées plutôt qu'une partition ?**
+- Les CDR IoT sont **massivement plus nombreux** (capteurs qui envoient des données toutes les minutes)
+- Les requêtes admin sur les CDR mobile ne doivent **jamais** scanner les CDR IoT
+- Les dashboards IoT et Telecom sont **différents** (pas les mêmes métriques)
+- L'archivage peut avoir des **politiques différentes** (IoT archivé plus tôt car moins de valeur unitaire)
+- Le `UNIQUE KEY` sur `provider_call_id` est plus performant sur des tables plus petites
 
 ### Règles d'isolation inter-modules (DDD-lite)
 

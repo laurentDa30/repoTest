@@ -129,7 +129,7 @@ class DetectDeviceAnomaliesJob implements ShouldQueue
 
 ## 3. Vérifications quotidiennes — Forfaits, Quotas et Hors-forfait (existant V1 — à migrer)
 
-Ces vérifications tournent quotidiennement dans la V1 et doivent être portées dans les modules **CDR** et **Telecom**.
+Ces vérifications tournent quotidiennement dans la V1 et doivent être portées dans les modules **CDR**, **Telecom**, **IoT** et **UCaaS**.
 
 ### 3.1 Dépassements de Data hors-forfait (lignes non-IoT)
 
@@ -162,7 +162,7 @@ class DetectDataOverageJob implements ShouldQueue
 Objectif : les SIMs IoT ont des quotas spécifiques (souvent très bas). Un dépassement peut indiquer un dysfonctionnement ou un abus.
 
 ```php
-// app/Modules/CDR/Jobs/DetectIoTQuotaOverageJob.php
+// app/Modules/IoT/Jobs/DetectIoTQuotaOverageJob.php
 // Exécuté quotidiennement
 
 class DetectIoTQuotaOverageJob implements ShouldQueue
@@ -196,6 +196,26 @@ class DetectPlanAnomaliesJob implements ShouldQueue
         // 3. Lignes avec forfait mais sans consommation depuis 30+ jours
         //    (potentielle SIM inactive non détectée)
         // 4. Forfaits avec dates incohérentes (start > end)
+    }
+}
+```
+
+### 3.4 Vérifications UCaaS (Wazo)
+
+```php
+// app/Modules/UCaaS/Jobs/DetectUCaaSAnomaliesJob.php
+// Exécuté quotidiennement
+
+class DetectUCaaSAnomaliesJob implements ShouldQueue
+{
+    public function handle(): void
+    {
+        // 1. Postes UCaaS actifs sans consommation depuis 30+ jours
+        //    (poste facturé mais inutilisé)
+        // 2. Pics anormaux d'appels sortants (potentielle fraude VoIP)
+        // 3. Appels internationaux sur des postes sans autorisation
+        // 4. Postes en erreur (pas de ping Wazo depuis 24h)
+        // 5. Licences Wazo actives sans poste associé
     }
 }
 ```
@@ -249,12 +269,13 @@ CREATE TABLE `alerts` (
 // app/Console/Kernel.php (ou routes/console.php en Laravel 12)
 
 // Vérifications quotidiennes (02:00 après l'agrégation CDR)
-Schedule::job(new DetectLineAnomaliesJob)->dailyAt('02:30');
-Schedule::job(new DetectDeviceAnomaliesJob)->dailyAt('02:45');
-Schedule::job(new DetectPlanAnomaliesJob)->dailyAt('03:00');
-Schedule::job(new DetectDataOverageJob)->dailyAt('03:15');
-Schedule::job(new DetectIoTQuotaOverageJob)->dailyAt('03:30');
+Schedule::job(new DetectLineAnomaliesJob)->dailyAt('02:30');       // Module Telecom
+Schedule::job(new DetectDeviceAnomaliesJob)->dailyAt('02:45');     // Module Stock
+Schedule::job(new DetectPlanAnomaliesJob)->dailyAt('03:00');       // Module Telecom
+Schedule::job(new DetectDataOverageJob)->dailyAt('03:15');         // Module CDR (mobile)
+Schedule::job(new DetectIoTQuotaOverageJob)->dailyAt('03:30');     // Module IoT
+Schedule::job(new DetectUCaaSAnomaliesJob)->dailyAt('03:45');      // Module UCaaS
 
 // Vérifications IA (après les vérifications classiques)
-Schedule::job(new DetectCDRAnomaliesJob)->dailyAt('04:00');
+Schedule::job(new DetectCDRAnomaliesJob)->dailyAt('04:00');        // Module IA
 ```

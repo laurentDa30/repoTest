@@ -178,26 +178,65 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 | `addresses` | Polymorphique |
 | `address_book_entries` | Carnet d'adresses multi-catégories |
 
-### Module **Telecom**
+### Module **Telecom** (mobile, fixe, internet — hors IoT et UCaaS)
 | Table | Rôle |
 |-------|------|
-| `lines` | Lignes télécom |
-| `sims` | Cartes SIM avec ICCID, IMSI, PIN/PUK |
+| `lines` | Lignes télécom (mobile, fixe, internet) — filtrées par `telecom_types` |
+| `sims` | Cartes SIM classiques (non-IoT) avec ICCID, IMSI, PIN/PUK |
 | `line_plan` | Pivot ligne ↔ forfait avec dates et prix |
-| `telecom_types` | Types de service (mobile, fixe, internet, IoT) |
+| `telecom_types` | Types de service (mobile, fixe, internet, IoT, UCaaS) — référentiel partagé |
 | `portabilities` | Portabilités effectuées (via Transatel) |
 | `portabilities_pending` | Portabilités en attente |
 | `mobile_plan_buyings` | Achats forfaits mobile |
 
-### Module **CDR / Consommations**
+### Module **IoT** (SIMs M2M, capteurs, quotas spécifiques)
 | Table | Rôle |
 |-------|------|
-| `calls` | CDR détaillés (12 Go+) |
-| `call_types` | Types d'appel (voix, SMS, data, MMS…) |
+| `lines` | Lignes IoT (filtrées par `telecom_types.id` = IoT) — même table que Telecom |
+| `sims` | SIMs IoT/M2M (même table, filtrées par usage) |
+| `calls_iot` | CDR IoT séparés (volume massif, structure légèrement différente) — **NOUVEAU V2** |
+| `daily_iot_summaries` | Agrégation quotidienne IoT par SIM/quota — **NOUVEAU V2** |
+| `monthly_iot_summaries` | Agrégation mensuelle IoT — **NOUVEAU V2** |
+
+> **Note** : Les lignes et SIMs IoT partagent les mêmes tables que Telecom (`lines`, `sims`) mais sont distinguées par le `telecom_type_id`. Les CDR IoT ont leur propre table car le volume est massivement plus élevé et les patterns de requêtes sont différents. Le module IoT a ses propres vérifications de quota et ses propres dashboards.
+
+### Module **UCaaS** (Wazo — communications unifiées)
+| Table | Rôle |
+|-------|------|
+| `lines` | Postes UCaaS (filtrés par `telecom_types.id` = UCaaS) — même table |
+| `calls_ucaas` | CDR Wazo (VoIP, conférence, messaging) — **NOUVEAU V2** |
+| `daily_ucaas_summaries` | Agrégation quotidienne UCaaS — **NOUVEAU V2** |
+| `monthly_ucaas_summaries` | Agrégation mensuelle UCaaS — **NOUVEAU V2** |
+
+> **Note** : Wazo représente un domaine métier distinct (collaboration, VoIP, télétravail) avec ses propres CDR et dashboards. Les lignes UCaaS sont dans la même table `lines` mais avec un type différent.
+
+### Module **Infogérance** (parc informatique clients)
+| Table | Rôle |
+|-------|------|
+| `collaborators` | Contacts gérés dans le cadre de l'infogérance pour les clients |
+| `client_collaborator` | Pivot collaborateurs ↔ clients avec dates |
+| `device_collaborator` | Affectation appareil ↔ collaborateur |
+
+> **Note** : Les collaborateurs ne sont PAS des utilisateurs de la plateforme. Ce sont des contacts du parc informatique client, avec un lien éventuel vers GLPI (`id_glpi`). Le module Infogérance peut générer des lignes de facture (prestation de service) via le contrat `Billable`.
+
+### Module **CDR / Consommations** (stockage et agrégation centralisés)
+| Table | Rôle |
+|-------|------|
+| `calls_mobile` | CDR mobile/fixe/internet détaillés — **RENOMMÉ** (ex-`calls`) |
+| `calls_iot` | CDR IoT détaillés (volume massif) — **NOUVEAU V2** |
+| `calls_ucaas` | CDR Wazo détaillés — **NOUVEAU V2** |
+| `call_types` | Types d'appel (voix, SMS, data, MMS, VoIP, conférence…) |
 | `units` | Unités de mesure |
-| `cdr_files` | Fichiers CDR importés |
-| `monthly_summaries` | Agrégation mensuelle par ligne |
+| `cdr_files` | Fichiers CDR importés (tous types, discriminé par `provider`) |
+| `daily_call_summaries` | Agrégation quotidienne mobile/fixe/internet — **NOUVEAU V2** |
+| `daily_iot_summaries` | Agrégation quotidienne IoT — **NOUVEAU V2** |
+| `daily_ucaas_summaries` | Agrégation quotidienne UCaaS — **NOUVEAU V2** |
+| `monthly_summaries` | Agrégation mensuelle par ligne (existante, à enrichir) |
+| `monthly_iot_summaries` | Agrégation mensuelle IoT — **NOUVEAU V2** |
+| `monthly_ucaas_summaries` | Agrégation mensuelle UCaaS — **NOUVEAU V2** |
 | `invoice_cdrs` | CDR compressés par facture |
+
+> **Note** : Le module CDR gère le stockage et l'agrégation de TOUS les types de CDR, mais dans des tables séparées. Les modules Telecom, IoT et UCaaS accèdent à leurs CDR respectifs via des contrats (interfaces) exposés par le module CDR. La séparation physique évite que les volumes IoT (potentiellement millions/mois) polluent les requêtes sur les CDR mobile.
 
 ### Module **Catalog**
 | Table | Rôle |
@@ -238,19 +277,25 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 | `stocks` | Entrepôts/stocks |
 | `states` | États/conditions des appareils |
 
-### Module **Order / Suivi**
+### Module **Ticket** (support, SAV, demandes)
 | Table | Rôle |
 |-------|------|
-| `tickets` | Tickets de suivi (commandes, SAV, demandes) |
+| `tickets` | Tickets de suivi (support, SAV, demandes) |
 | `tickets_messages` | Messages dans les tickets |
 | `tickets_categories` / `tickets_labels` | Catégorisation |
 | `ticket_todos` / `ticket_todo_messages` | Tâches dans les tickets |
+
+### Module **Order** (commandes — s'appuie sur le module Ticket)
+| Table | Rôle |
+|-------|------|
 | `orders` | Commandes fournisseur |
 | `order_receives` | Réceptions de commande |
 | `order_client_status` | Statut de livraison côté client |
 | `client_orders` | Commandes client (depuis le portail) |
 | `todo_purchases` / `todo_purchase_order` | Achats à effectuer |
 | `carts` | Paniers |
+
+> **Note** : Le module Order utilise le système de tickets du module Ticket pour le suivi des commandes. Un ticket peut être lié à une commande, mais tous les tickets ne sont pas des commandes (SAV, demandes diverses).
 
 ### Module **Ambassador**
 | Table | Rôle |
