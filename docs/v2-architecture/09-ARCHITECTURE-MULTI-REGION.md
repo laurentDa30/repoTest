@@ -118,8 +118,10 @@ Ce sont les **données de référence** partagées entre toutes les régions. G�
 Chaque région a **sa propre copie complète** de ces tables. Les données ne se mélangent jamais.
 
 ```
-📁 Clients & Relations
+📁 Clients & Relations (inclut les collaborateurs — entité pivot)
 ├── clients                        -- Clients de la région
+├── collaborators                  -- Employés des clients (entité pivot : lignes + appareils + GLPI)
+├── client_collaborator            -- Pivot collaborateurs ↔ clients
 ├── client_user                    -- Utilisateurs portail ↔ clients
 ├── client_todos / client_todo_messages
 ├── client_preferences

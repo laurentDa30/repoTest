@@ -77,11 +77,11 @@ app/
 │   │   │   └── Providers/        # ServiceProvider du module (bindings)
 │   │   └── routes.php
 │   │
-│   ├── Client/             # Clients, agences, référents, préférences
+│   ├── Client/             # Clients, agences, référents, préférences, collaborateurs (entité pivot)
 │   ├── Telecom/            # Lignes mobile/fixe/internet, SIMs, portabilités
 │   ├── IoT/                # SIMs IoT, quotas spécifiques, CDR IoT séparés
 │   ├── UCaaS/              # Wazo : communications unifiées, VoIP, collaboration
-│   ├── Infogerance/        # Collaborateurs clients, parc informatique, GLPI
+│   ├── Infogerance/        # Parc informatique, GLPI (s'appuie sur les collaborateurs du module Client)
 │   ├── Catalog/            # Matériels, services, forfaits, fournisseurs
 │   ├── Ticket/             # Tickets support, SAV, demandes (messages, catégories, labels, todos)
 │   ├── Order/              # Commandes fournisseur/client, suivi, transit (s'appuie sur le module Ticket)
@@ -165,6 +165,55 @@ class GenerateInvoiceAction
 ```
 
 **Avantage** : chaque module gère ses propres données et sa propre logique de calcul. Le module Billing ne connaît pas les détails — il collecte des lignes de facture via l'interface. Ajouter un nouveau domaine facturable = implémenter `Billable`, zéro modification du module Billing.
+
+### Le collaborateur : entité pivot et centre de coût pour le client
+
+Le collaborateur est un **employé du client** (pas un utilisateur de la plateforme). C'est **le client qui paye** pour tout ce que le collaborateur détient :
+- **Des lignes** (mobile, fixe, IoT) → lien `lines.collaborator_id` → coût forfait + CDR
+- **Des appareils** (téléphone, PC, tablette) → lien `device_collaborator` → coût leasing/achat
+- **Un profil d'infogérance** (GLPI, parc IT) → lien `collaborators.id_glpi` → coût prestation
+
+Le collaborateur est donc un **centre de coût** : il permet au client de suivre combien lui coûte chaque employé (somme des lignes, appareils et prestations). C'est pourquoi il vit dans le module **Client** (il appartient au client), pas dans le module Infogérance. Les autres modules accèdent au collaborateur via le contrat exposé par le module Client.
+
+```
+Module Client (propriétaire du collaborateur)
+│
+│   collaborators
+│   ├── client_id        → Client propriétaire
+│   ├── designation, lastname, firstname, email, phone
+│   ├── profil_id        → Profil métier
+│   ├── is_register_to_glpi, id_glpi → Lien infogérance
+│   └── ...
+│
+│   Expose : CollaboratorContract (interface)
+│
+├───────────────────────────────────────────────────┐
+│                                                   │
+▼                          ▼                        ▼
+Module Telecom             Module Stock             Module Infogérance
+(lines.collaborator_id)    (device_collaborator)    (GLPI, parc IT)
+→ Le client paye les       → Le client paye les     → Le client paye les
+  forfaits + CDR du collab.   appareils du collab.     prestations IT du collab.
+  (lignes + consommations)    (leasing/achat)          (GLPI, interventions)
+```
+
+**Règle** : les modules Telecom, Stock et Infogérance ne manipulent **jamais** directement le modèle `Collaborator`. Ils passent par le contrat `CollaboratorContract` exposé par le module Client.
+
+```php
+// app/Modules/Client/Domain/Contracts/CollaboratorContract.php
+interface CollaboratorContract
+{
+    public function findForClient(int $clientId): Collection;
+    public function getWithLines(int $collaboratorId): CollaboratorWithLinesDTO;
+    public function getWithDevices(int $collaboratorId): CollaboratorWithDevicesDTO;
+
+    /** Coût total d'un collaborateur pour le client (lignes + appareils + prestations) */
+    public function getCostForClient(int $collaboratorId): CollaboratorCostDTO;
+
+    /** Coût de tous les collaborateurs d'un client (vue récapitulative) */
+    public function getCostSummaryForClient(int $clientId): Collection;
+}
+```
 
 ### Séparation des CDR par type
 

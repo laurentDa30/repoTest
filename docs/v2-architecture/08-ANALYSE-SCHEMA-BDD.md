@@ -161,10 +161,11 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 
 ## 3. Cartographie des domaines métier (mapping vers modules V2)
 
-### Module **Client**
+### Module **Client** (inclut les collaborateurs — entité pivot et centre de coût)
 | Table | Rôle |
 |-------|------|
 | `clients` | Entité centrale |
+| `collaborators` | Employés des clients — entité pivot et **centre de coût** (le client paye les lignes, appareils et prestations de chaque collab.) |
 | `client_collaborator` | Pivot collaborateurs/clients avec dates |
 | `client_user` | Liaison utilisateurs portail ↔ clients |
 | `client_todos` / `client_todo_messages` | Checklist par client |
@@ -178,16 +179,20 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 | `addresses` | Polymorphique |
 | `address_book_entries` | Carnet d'adresses multi-catégories |
 
+> **Le collaborateur est une entité pivot et un centre de coût pour le client** : il appartient au module Client mais est référencé par les modules Telecom (`lines.collaborator_id`), Stock (`device_collaborator`) et Infogérance (`collaborators.id_glpi`). **C'est le client qui paye** pour tout ce que le collaborateur détient (forfaits, CDR, appareils, prestations). Le suivi par collaborateur permet au client de savoir combien lui coûte chaque employé. Les autres modules accèdent aux collaborateurs via le contrat `CollaboratorContract` exposé par le module Client.
+
 ### Module **Telecom** (mobile, fixe, internet — hors IoT et UCaaS)
 | Table | Rôle |
 |-------|------|
-| `lines` | Lignes télécom (mobile, fixe, internet) — filtrées par `telecom_types` |
+| `lines` | Lignes télécom — `collaborator_id` lie la ligne au collaborateur (module Client) |
 | `sims` | Cartes SIM classiques (non-IoT) avec ICCID, IMSI, PIN/PUK |
 | `line_plan` | Pivot ligne ↔ forfait avec dates et prix |
 | `telecom_types` | Types de service (mobile, fixe, internet, IoT, UCaaS) — référentiel partagé |
 | `portabilities` | Portabilités effectuées (via Transatel) |
 | `portabilities_pending` | Portabilités en attente |
 | `mobile_plan_buyings` | Achats forfaits mobile |
+
+> **Lien collaborateur** : `lines.collaborator_id` référence un collaborateur du module Client. Un collaborateur peut détenir plusieurs lignes (mobile + fixe), chacune avec son forfait et ses CDR. Le module Telecom accède au collaborateur via `CollaboratorContract`.
 
 ### Module **IoT** (SIMs M2M, capteurs, quotas spécifiques)
 | Table | Rôle |
@@ -210,14 +215,14 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 
 > **Note** : Wazo représente un domaine métier distinct (collaboration, VoIP, télétravail) avec ses propres CDR et dashboards. Les lignes UCaaS sont dans la même table `lines` mais avec un type différent.
 
-### Module **Infogérance** (parc informatique clients)
-| Table | Rôle |
-|-------|------|
-| `collaborators` | Contacts gérés dans le cadre de l'infogérance pour les clients |
-| `client_collaborator` | Pivot collaborateurs ↔ clients avec dates |
-| `device_collaborator` | Affectation appareil ↔ collaborateur |
+### Module **Infogérance** (parc informatique — s'appuie sur le module Client pour les collaborateurs)
 
-> **Note** : Les collaborateurs ne sont PAS des utilisateurs de la plateforme. Ce sont des contacts du parc informatique client, avec un lien éventuel vers GLPI (`id_glpi`). Le module Infogérance peut générer des lignes de facture (prestation de service) via le contrat `Billable`.
+Le module Infogérance ne possède pas de tables propres pour le moment. Il s'appuie sur :
+- **`collaborators`** (module Client) : via le contrat `CollaboratorContract` — le champ `id_glpi` et `is_register_to_glpi` permettent le lien avec GLPI
+- **`device_collaborator`** (module Stock) : pour savoir quel matériel est affecté à quel collaborateur
+- **`device_client` / `device_group`** (module Stock) : pour la vue globale du parc client
+
+> **Note** : Le module Infogérance est un module de **lecture et d'orchestration** — il agrège les données des modules Client et Stock pour fournir une vue "parc informatique" par client. À terme, il pourra avoir ses propres tables (contrats d'infogérance, SLA, interventions) et générer des lignes de facture via le contrat `Billable`.
 
 ### Module **CDR / Consommations** (stockage et agrégation centralisés)
 | Table | Rôle |
@@ -276,6 +281,8 @@ Tables `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role
 | `device_stock` | Appareils en stock (avec réservation) |
 | `stocks` | Entrepôts/stocks |
 | `states` | États/conditions des appareils |
+
+> **Lien collaborateur** : `device_collaborator` lie un appareil à un collaborateur (module Client). Un collaborateur peut détenir plusieurs appareils (PC, téléphone, tablette). Le module Stock accède au collaborateur via `CollaboratorContract`. Le module Infogérance agrège ces données pour la vue parc IT.
 
 ### Module **Ticket** (support, SAV, demandes)
 | Table | Rôle |
