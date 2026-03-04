@@ -416,6 +416,14 @@ WHERE c.client_id IS NULL;
 
 **Gain** : Les requêtes CDR par client passent d'un JOIN à un WHERE direct. Impact immédiat sur les dashboards.
 
+**Important — `client_id` et changement de propriétaire d'une ligne** :
+- Le `client_id` sur un CDR représente le client **au moment de l'appel** (snapshot historique)
+- Si une ligne change de client, les anciens CDR conservent l'ancien `client_id`
+- Seuls les **nouveaux CDR** (importés après le changement) reçoivent le nouveau `client_id`
+- Le job d'import CDR prend le `client_id` courant de la ligne au moment de l'insertion
+- **Pas besoin** de vérification quotidienne de concordance — c'est par conception un instantané
+- Le backfill initial utilise le `client_id` actuel de la ligne (acceptable car les transferts de ligne sont rares)
+
 #### 1.2 Ajouter `daily_call_summaries`
 
 ```sql
@@ -556,23 +564,43 @@ CREATE TABLE `invoice_lines` (
 ) ENGINE=InnoDB;
 ```
 
-#### Stratégie de migration
+#### Stratégie de migration — NE PAS modifier la table existante
+
+**Principe fondamental** : On ne touche **jamais** à la structure de la table `invoices` actuelle. La V1 continue de fonctionner exactement comme avant pendant toute la transition. On crée les nouvelles tables **à côté**.
 
 ```
-1. Créer invoices_v2 et invoice_lines (vides)
-2. Script de migration qui :
-   a. Pour chaque invoice existante :
-      - Parse le JSON doc
-      - Insère l'en-tête dans invoices_v2
-      - Parse les lignes du JSON et insère dans invoice_lines
-      - Recalcule et vérifie les totaux
-   b. Dual-write pendant la période de transition :
-      - La V2 écrit dans les deux tables
-      - La V1 continue à lire l'ancienne table
-3. Quand tous les modules de facturation sont migrés :
-   - Renommer invoices → invoices_legacy
-   - Renommer invoices_v2 → invoices
+Phase A — Création (pas d'impact sur la V1)
+   1. Créer invoices_v2 et invoice_lines (vides, à côté de invoices)
+   2. La V1 continue de lire/écrire dans invoices normalement
+
+Phase B — Migration des données historiques
+   3. Script de migration batch (job queue) :
+      a. Pour chaque invoice existante :
+         - Parse le JSON doc
+         - Insère l'en-tête dans invoices_v2
+         - Parse les lignes du JSON et insère dans invoice_lines
+         - Recalcule et vérifie les totaux (checksum)
+      b. Vérification : comparer count + sum(amount) entre les deux tables
+
+Phase C — Dual-write (transition)
+   4. Le nouveau code de facturation V2 écrit dans les deux tables :
+      - invoices (JSON blob, pour la V1 qui lit encore)
+      - invoices_v2 + invoice_lines (normalisé, pour le nouveau code V2)
+   5. Le nouveau code V2 LIT uniquement depuis invoices_v2 + invoice_lines
+   6. La V1 continue de lire depuis invoices (aucun changement)
+
+Phase D — Bascule finale (quand V1 éteinte)
+   7. Renommer invoices → invoices_legacy (conservation 6 mois par sécurité)
+   8. Renommer invoices_v2 → invoices
+   9. Arrêter le dual-write
+   10. Supprimer invoices_legacy après confirmation
 ```
+
+**Pourquoi cette approche** :
+- La table `invoices` avec son JSON blob est utilisée dans tout le code V1 (enregistrement ET lecture)
+- Modifier la structure existante obligerait à modifier le code V1 à **de nombreux endroits**
+- En créant de nouvelles tables à côté, le code V1 n'est **jamais** impacté
+- Le risque de régression est minimal : la V1 ne change pas, la V2 utilise ses propres tables
 
 **Gain estimé** :
 - `invoices_v2` sans JSON : quelques Mo au lieu de Go

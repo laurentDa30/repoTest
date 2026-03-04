@@ -30,7 +30,7 @@ C'est le problème structurel n°1. Aujourd'hui :
 - `calls.provider_call_id` UNIQUE empêche les doublons CDR (bon point)
 - Sans queue robuste, un import échoué peut passer inaperçu
 
-#### D. Laravel 10 → 12
+#### E. Laravel 10 → 12
 - Laravel 10 : fin de support sécurité février 2025 (déjà expiré)
 - Livewire 2 → 3 : changement majeur (syntaxe, lifecycle, performance)
 

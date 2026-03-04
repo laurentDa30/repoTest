@@ -35,7 +35,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 | Couche | Technologie | Justification |
 |--------|------------|---------------|
-| Backend | Laravel 12 (LTS) | Continuité de compétences, écosystème riche |
+| Backend | Laravel 12 | Continuité de compétences, écosystème riche |
 | Multi-tenant | stancl/tenancy v3 (database-per-tenant) | Isolation BDD par région, codebase unique |
 | Frontend (tous portails) | Livewire 3 + Alpine.js + Tailwind CSS | Stack unifiée, productivité maximale pour 2 devs backend-first |
 | Base relationnelle | MySQL 8.0 (1 BDD central + 1 BDD/région) | Isolation pannes, RGPD, scaling indépendant |
@@ -101,3 +101,6 @@ Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` corr
 > - `08-ANALYSE-SCHEMA-BDD.md` — Analyse détaillée des 80+ tables, problèmes critiques, plan de migration schéma
 > - `09-ARCHITECTURE-MULTI-REGION.md` — Hub & Spoke, isolation BDD par région, sync catalogue, SSO, provisioning
 > - `10-FONCTIONNALITES-IA.md` — Fonctionnalités IA (anomalies CDR, optimisation forfaits, scoring prospect, assistant admin, churn) + NVIDIA Shark
+> - `11-VERIFICATIONS-ANOMALIES.md` — Vérifications existantes V1 à porter (lignes, matériel, forfaits, quotas IoT, hors-forfait data)
+> - `12-CONVENTIONS-CODE.md` — Standards et conventions de code V2 (PHP, Laravel, DDD-lite, Git, tests)
+> - `13-POINTS-REUNION.md` — Points en attente de décision collective (direct_debit_accounts, numérotation factures, etc.)

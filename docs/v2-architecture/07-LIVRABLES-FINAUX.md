@@ -102,7 +102,7 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 ### Backend
 | Composant | Technologie | Version |
 |-----------|------------|---------|
-| Framework | Laravel | 12 (LTS) |
+| Framework | Laravel | 12 |
 | PHP | PHP | 8.3 |
 | ORM | Eloquent | Natif Laravel |
 | Multi-tenancy | stancl/tenancy | ^3.0 (database-per-tenant) |
@@ -290,14 +290,26 @@ Voir **06-CYBERSECURITE.md** pour le détail complet.
 ```php
 // routes/web.php
 Route::get('/health', function () {
-    $checks = [
-        'database' => DB::connection()->getPdo() ? 'ok' : 'fail',
-        'redis' => Redis::ping() ? 'ok' : 'fail',
-        'queue' => Queue::size('default') < 1000 ? 'ok' : 'warning',
-        'disk' => disk_free_space('/') > 1_000_000_000 ? 'ok' : 'warning',
-        'last_cdr_import' => Cache::get('last_cdr_import_at') > now()->subHours(3)
-            ? 'ok' : 'warning',
-    ];
+    $checks = [];
+
+    try {
+        DB::connection()->getPdo();
+        $checks['database'] = 'ok';
+    } catch (\Throwable $e) {
+        $checks['database'] = 'fail';
+    }
+
+    try {
+        Redis::ping();
+        $checks['redis'] = 'ok';
+    } catch (\Throwable $e) {
+        $checks['redis'] = 'fail';
+    }
+
+    $checks['queue'] = Queue::size('default') < 1000 ? 'ok' : 'warning';
+    $checks['disk'] = disk_free_space('/') > 1_000_000_000 ? 'ok' : 'warning';
+    $checks['last_cdr_import'] = Cache::get('last_cdr_import_at') > now()->subHours(3)
+        ? 'ok' : 'warning';
 
     $status = collect($checks)->contains('fail') ? 503 : 200;
 
@@ -472,7 +484,7 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 - [ ] Rate limiting actif sur toutes les routes API
 - [ ] CSP + HSTS headers en place
 - [ ] Tests anti-fuite cross-tenant passent
-- [ ] SSO tokens validés (one-time-use, expiration 60s)
+- [ ] SSO tokens validés (JWT RS256, one-time-use, expiration 5min)
 - [ ] KMS externe configuré (pas de clés dans .env)
 
 ### Multi-tenant

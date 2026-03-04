@@ -144,41 +144,24 @@ class LinePolicy
 #### Chiffrement applicatif
 
 ```php
-// app/Modules/Shared/Traits/EncryptsAttributes.php
-trait EncryptsAttributes
-{
-    // Colonnes chiffrées automatiquement en lecture/écriture
-    // Utilise Laravel Crypt (AES-256-CBC)
-    // Clé stockée dans KMS, pas dans .env
+// Utiliser le cast natif Laravel `encrypted` (disponible depuis Laravel 8+)
+// Pas besoin de trait custom — Laravel gère le chiffrement AES-256-CBC nativement
+// La clé de chiffrement doit être stockée dans KMS, pas dans .env
 
-    public function getAttribute($key)
-    {
-        $value = parent::getAttribute($key);
-
-        if (in_array($key, $this->encrypted ?? []) && $value !== null) {
-            return decrypt($value);
-        }
-
-        return $value;
-    }
-
-    public function setAttribute($key, $value)
-    {
-        if (in_array($key, $this->encrypted ?? []) && $value !== null) {
-            $value = encrypt($value);
-        }
-
-        return parent::setAttribute($key, $value);
-    }
-}
-
-// Utilisation
 class Client extends Model
 {
-    use EncryptsAttributes;
-
-    protected array $encrypted = ['iban', 'bic', 'siret'];
+    protected function casts(): array
+    {
+        return [
+            'iban'  => 'encrypted',
+            'bic'   => 'encrypted',
+            'siret' => 'encrypted',
+        ];
+    }
 }
+
+// Les données sont chiffrées en écriture et déchiffrées en lecture automatiquement.
+// Pour rechercher sur un champ chiffré, utiliser un hash blind index séparé.
 ```
 
 #### Gestion des secrets
@@ -275,7 +258,7 @@ class CircuitBreaker
 // Risque : un admin régional accède au Hub central ou à une autre région
 // Mitigation :
 // - Le Hub central a sa propre table users (pas partagée avec les tenants)
-// - Les tokens SSO sont one-time-use, expirés après 60 secondes, signés HMAC
+// - Les tokens SSO sont one-time-use, expirés après 5 minutes, signés JWT RS256
 // - L'audit trail du Hub logge chaque accès cross-région avec IP + user_agent
 
 // 3. INJECTION VIA LE NOM DE TENANT

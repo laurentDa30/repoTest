@@ -80,7 +80,8 @@ app/
 │   ├── Client/             # Clients, agences, collaborateurs
 │   ├── Telecom/            # Lignes, SIMs, portabilités, appareils
 │   ├── Catalog/            # Matériels, services, forfaits, fournisseurs
-│   ├── Order/              # Commandes, suivi, transit
+│   ├── Ticket/             # Tickets support, SAV, demandes (messages, catégories, labels, todos)
+│   ├── Order/              # Commandes fournisseur/client, suivi, transit (s'appuie sur le module Ticket)
 │   ├── Billing/            # Facturation, comptabilité, SEPA
 │   ├── CDR/                # Consommations (table partitionnée)
 │   ├── Stock/              # Gestion stock, SIMs physiques
@@ -90,6 +91,7 @@ app/
 │   ├── Content/            # Rapports, nouveautés, mailing, templates
 │   ├── Auth/               # Authentification, rôles, permissions
 │   ├── Finance/            # Dashboard finance, analyse, exports
+│   ├── IA/                 # Intelligence artificielle (anomalies CDR, scoring, optimisation forfaits, assistant)
 │   └── Central/            # Hub multi-région (catalogue, sync, dashboard global)
 │
 ├── Shared/                 # Code partagé entre modules

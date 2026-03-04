@@ -95,12 +95,13 @@ Ce sont les **données de référence** partagées entre toutes les régions. G�
 ├── roles                          -- Rôles (super-admin, admin-région, etc.)
 ├── permissions                    -- Permissions
 ├── role_has_permissions           -- Matrice RBAC
-├── segmentations                  -- Segmentations client
+├── segmentations                  -- Segmentations client (sync vers régions)
 ├── payment_types                  -- Types de paiement
-├── direct_debit_accounts          -- Comptes SEPA (si partagés)
-├── news                           -- Actualités (diffusées à toutes les régions)
-├── posts_types                    -- Types de contenu
-├── templates                      -- Templates d'email
+├── direct_debit_accounts          -- ⚠️ À CONFIRMER EN RÉUNION (IBAN société pour prélèvements)
+├── news                           -- Actualités (diffusées vers toutes les régions ou ciblées)
+├── news_regions                   -- Pivot news ↔ régions ciblées (NOUVEAU)
+├── posts_types                    -- Types de campagnes (Newsletter, Prospection, etc.)
+├── templates                      -- Templates d'email de base (les régions peuvent en créer localement)
 ├── prompts                        -- Prompts IA (si partagés)
 └── project_types                  -- Types de projets RSE
 
@@ -131,7 +132,7 @@ Chaque région a **sa propre copie complète** de ces tables. Les données ne se
 ├── referents                      -- Contacts référents
 ├── groups / sub_groups            -- Agences/départements
 ├── addresses / address_book_entries
-└── segmentations                  -- (copie locale, sync depuis central)
+└── segmentations                  -- Copie locale (sync automatique depuis central)
 
 📁 Telecom
 ├── lines                          -- Lignes de la région
@@ -185,6 +186,7 @@ Chaque région a **sa propre copie complète** de ces tables. Les données ne se
 
 📁 Contenu régional
 ├── posts / post_sends             -- Campagnes de la région
+├── templates                      -- Templates locaux (en plus de ceux syncés du central)
 ├── events
 ├── errors
 ├── trees
@@ -208,7 +210,11 @@ Central → Région (push/sync)
 ├── telecom_types, call_types, units
 ├── base_carbone
 ├── roles, permissions, role_has_permissions
+├── segmentations                      -- Segmentation client
 ├── payment_types
+├── posts_types                        -- Types de campagnes
+├── templates                          -- Templates de base (les régions ajoutent les leurs)
+├── news (+ news_regions pour ciblage) -- Actualités ciblées par région
 └── project_types
 
 Région → Central (push summaries)

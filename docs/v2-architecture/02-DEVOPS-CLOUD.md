@@ -151,7 +151,13 @@ FROM php:8.3-fpm-alpine AS base
 RUN apk add --no-cache \
     nginx \
     supervisor \
-    && docker-php-ext-install pdo_mysql opcache pcntl
+    icu-dev \
+    libzip-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    libpng-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo_mysql opcache pcntl bcmath intl zip gd
 
 COPY docker/php.ini /usr/local/etc/php/conf.d/custom.ini
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
