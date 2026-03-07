@@ -99,12 +99,22 @@ return [
     'filesystem' => [
         /**
          * Each disk listed in the 'disks' array will be suffixed by the suffix_base, followed by the tenant_id.
+         *
+         * Pour les disks S3 (invoices, documents, exports, cdr-archives),
+         * le bootstrapper préfixe le root avec le tenant_id :
+         *   invoices → {tenant_id}/invoices/
+         *   documents → {tenant_id}/documents/
+         *
+         * Pour les disks locaux (local, public), le storage_path est suffixé.
          */
         'suffix_base' => 'tenant',
         'disks' => [
             'local',
             'public',
-            // 's3',
+            'invoices',
+            'documents',
+            'exports',
+            'cdr-archives',
         ],
 
         /**
@@ -113,7 +123,7 @@ return [
          * See https://tenancyforlaravel.com/docs/v3/tenancy-bootstrappers/#filesystem-tenancy-boostrapper
          */
         'root_override' => [
-            // Disks whose roots should be overridden after storage_path() is suffixed.
+            // Disks locaux : root basé sur le storage_path suffixé par tenant
             'local' => '%storage_path%/app/',
             'public' => '%storage_path%/app/public/',
         ],
@@ -121,11 +131,8 @@ return [
         /**
          * Should storage_path() be suffixed.
          *
-         * Note: Disabling this will likely break local disk tenancy. Only disable this if you're using an external file storage service like S3.
-         *
-         * For the vast majority of applications, this feature should be enabled. But in some
-         * edge cases, it can cause issues (like using Passport with Vapor - see #196), so
-         * you may want to disable this if you are experiencing these edge case issues.
+         * Activé pour que les disks locaux (cache, logs, views) soient isolés par tenant.
+         * Les disks S3 n'utilisent pas storage_path(), ils sont isolés par le préfixe root.
          */
         'suffix_storage_path' => true,
 
