@@ -223,7 +223,115 @@ Rechercher/remplacer les anciens appels imbriqués :
 
 ---
 
-## Étape 5 — Commandes post-installation
+## Étape 5 — Migration du `Kernel.php` vers `bootstrap/app.php`
+
+En Laravel 11, le fichier `app/Http/Kernel.php` **n'existe plus**. Toute la configuration des middleware se fait dans `bootstrap/app.php`.
+
+### 5.1 Supprimer `app/Http/Kernel.php`
+
+Le fichier suivant doit être supprimé :
+
+```
+app/Http/Kernel.php
+```
+
+### 5.2 Créer/modifier `bootstrap/app.php`
+
+Remplacer le contenu de `bootstrap/app.php` par :
+
+```php
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware) {
+
+        // ─── Middleware globaux (ex-$middleware) ──────────────
+        $middleware->use([
+            // \App\Http\Middleware\TrustHosts::class,
+            \App\Http\Middleware\TrustProxies::class,
+            \Illuminate\Http\Middleware\HandleCors::class,
+            \App\Http\Middleware\PreventRequestsDuringMaintenance::class,
+            \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
+            \App\Http\Middleware\TrimStrings::class,
+            \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+        ]);
+
+        // ─── Groupe "web" ────────────────────────────────────
+        $middleware->group('web', [
+            \App\Http\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+            \Illuminate\Session\Middleware\StartSession::class,
+            // \Illuminate\Session\Middleware\AuthenticateSession::class,
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            \App\Http\Middleware\VerifyCsrfToken::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\SetLocale::class,
+        ]);
+
+        // ─── Groupe "api" ────────────────────────────────────
+        $middleware->group('api', [
+            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            'throttle:60,1',
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ]);
+
+        // ─── Alias de middleware (ex-$routeMiddleware) ───────
+        $middleware->alias([
+            'auth'               => \App\Http\Middleware\Authenticate::class,
+            'auth.basic'         => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
+            // 'gate'            => \App\Http\Middleware\AuthGates::class,
+            'cache.headers'      => \Illuminate\Http\Middleware\SetCacheHeaders::class,
+            'can'                => \Illuminate\Auth\Middleware\Authorize::class,
+            'guest'              => \App\Http\Middleware\RedirectIfAuthenticated::class,
+            'password.confirm'   => \Illuminate\Auth\Middleware\RequirePassword::class,
+            'signed'             => \Illuminate\Routing\Middleware\ValidateSignature::class,
+            'throttle'           => \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            'verified'           => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+            'admin'              => \App\Http\Middleware\IsAdmin::class,
+            'role'               => \Spatie\Permission\Middlewares\RoleMiddleware::class,
+            'permission'         => \Spatie\Permission\Middlewares\PermissionMiddleware::class,
+            'role_or_permission' => \Spatie\Permission\Middlewares\RoleOrPermissionMiddleware::class,
+            'pageviews'          => \App\Http\Middleware\LogPageViews::class,
+            'librenms.api'       => \App\Http\Middleware\LibrenmsApi::class,
+            'team.access'        => \App\Http\Middleware\TeamAccessToRizom::class,
+        ]);
+    })
+    ->withExceptions(function (Exceptions $exceptions) {
+        //
+    })
+    ->create();
+```
+
+### 5.3 Correspondance Kernel.php → bootstrap/app.php
+
+| Laravel 10 (`Kernel.php`) | Laravel 11 (`bootstrap/app.php`) |
+|---|---|
+| `protected $middleware = [...]` | `$middleware->use([...])` |
+| `protected $middlewareGroups = ['web' => [...]]` | `$middleware->group('web', [...])` |
+| `protected $middlewareGroups = ['api' => [...]]` | `$middleware->group('api', [...])` |
+| `protected $routeMiddleware = [...]` | `$middleware->alias([...])` |
+
+### 5.4 Fichiers à supprimer après migration
+
+Ces fichiers hérités de Laravel 10 ne sont plus utilisés en Laravel 11 :
+
+- `app/Http/Kernel.php` — remplacé par `bootstrap/app.php`
+- `app/Console/Kernel.php` — remplacé par `routes/console.php`
+- `app/Exceptions/Handler.php` — remplacé par `->withExceptions()` (voir Étape 3)
+
+---
+
+## Étape 6 — Commandes post-installation
 
 ```bash
 # Vider les caches
@@ -241,23 +349,23 @@ php artisan vendor:publish --tag=backup-config
 
 ---
 
-## Étape 6 — Points de vigilance
+## Étape 7 — Points de vigilance
 
-### 6.1 Livewire 2 → 3
+### 7.1 Livewire 2 → 3
 
 - Les directives Blade `@livewire` deviennent `<livewire:composant />`
 - `wire:model` est désormais "deferred" par défaut (utiliser `wire:model.live` pour le comportement temps réel)
 - Les méthodes `emit()` / `emitTo()` sont remplacées par `dispatch()` / `dispatch()->to()`
 - Les propriétés `$rules` et `$messages` deviennent des méthodes `rules()` et `messages()`
 
-### 6.2 Laravel 10 → 11
+### 7.2 Laravel 10 → 11
 
 - Les fichiers de config ont été simplifiés (moins de fichiers dans `config/`)
 - Le fichier `bootstrap/app.php` a changé de structure
 - Les middleware se déclarent différemment (plus de `Kernel.php` en Laravel 11+)
 - Le `Handler.php` d'exceptions est remplacé par `->withExceptions()` dans `bootstrap/app.php`
 
-### 6.3 Base de données
+### 7.3 Base de données
 
 - Vérifier la compatibilité MySQL 8.0
 - Les migrations doivent être jouées dans l'ordre
@@ -265,7 +373,7 @@ php artisan vendor:publish --tag=backup-config
 
 ---
 
-## Étape 7 — Checklist avant déploiement
+## Étape 8 — Checklist avant déploiement
 
 - [ ] `.env` contient `BACKUP_NOTIFICATION_EMAIL`
 - [ ] `.env` contient toutes les variables `FTP_TRANSATEL_*`
@@ -273,6 +381,8 @@ php artisan vendor:publish --tag=backup-config
 - [ ] `app/Exceptions/Handler.php` étend `ExceptionHandler` (pas `EmailHandler`)
 - [ ] Les appels `Storage::disk('transatel-cdr')[...]` ont été remplacés par les nouveaux noms de disques
 - [ ] `config/filesystems.php` contient les 6 disques Transatel séparés
+- [ ] `app/Http/Kernel.php` supprimé, middleware migrés dans `bootstrap/app.php`
+- [ ] `app/Console/Kernel.php` supprimé, scheduler migré dans `routes/console.php`
 - [ ] `composer update -W` se termine sans erreur
 - [ ] `php artisan package:discover` fonctionne
 - [ ] `php artisan migrate --pretend` ne montre pas d'erreurs
@@ -308,3 +418,4 @@ ou mettre une valeur par défaut dans `config/backup.php`
 |------|-------------|
 | 2026-03-09 | Création du guide — Fix spatie/laravel-backup notification email |
 | 2026-03-09 | Ajout suppression bengels/laravel-email-exceptions, refactoring disques SFTP Transatel |
+| 2026-03-09 | Ajout migration Kernel.php → bootstrap/app.php (étape 5) |
