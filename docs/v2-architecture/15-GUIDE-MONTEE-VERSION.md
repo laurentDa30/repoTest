@@ -19,13 +19,51 @@
 
 ```json
 {
-    "require": {
+        "require": {
         "php": "^8.2",
-        "laravel/framework": "^12.0",
-        "livewire/livewire": "^3.0",
-        "spatie/laravel-backup": "^9.0",
-        "stancl/tenancy": "^3.0"
-    }
+        "ext-json": "*",
+      "barryvdh/laravel-snappy": "^1.0",
+        "bugsnag/bugsnag-laravel": "^2.28",
+        "coderflex/laravel-ticket": "^2.0",
+        "digitick/sepa-xml": "2.2.0",
+        "intervention/validation": "^4.0",
+        "ixudra/curl": "6.22.1",
+        "jenssegers/agent": "2.6.4",
+        "laravel/framework": "^11.0",
+        "league/flysystem-aws-s3-v3": "^3.0",
+        "league/flysystem-ftp": "^3.16",
+        "league/flysystem-sftp-v3": "^3.0",
+        "maatwebsite/excel": "*",
+        "pusher/pusher-php-server": "^7.2",
+      "opcodesio/log-viewer": "^3.0",
+      "spatie/laravel-backup": "^9.0",
+      "zanysoft/laravel-zip": "^3.0",
+      "guzzlehttp/guzzle": "^7.8",
+        "nunomaduro/termwind": "^2.0",
+        "livewire/livewire": "^3.4",
+        "laravel/dusk": "^8.0",
+        "laravel/sanctum": "^4.0",
+        "laravel/tinker": "^2.9",
+        "laravel/ui": "^4.5",
+        "symfony/var-dumper": "^7.0",
+        "symfony/http-client": "^7.0",
+        "spatie/laravel-medialibrary": "^11.0",
+        "spatie/laravel-permission": "^6.0",
+        "spatie/laravel-tags": "^4.7",
+        "yajra/laravel-datatables-oracle": "^11.0",
+        "barryvdh/laravel-ide-helper": "^3.0",
+        "laravel/fortify": "^1.27"
+    },
+    "require-dev": {
+        "barryvdh/laravel-debugbar": "^3.5",
+        "barryvdh/laravel-ide-helper": "^3.0",
+        "fakerphp/faker": "^1.9.1",
+        "laravel/sail": "^1.0.1",
+        "mockery/mockery": "^1.4.2",
+        "nunomaduro/collision": "^8.0",
+        "spatie/laravel-ignition": "^2.4",
+        "phpunit/phpunit": "^11.0"
+    },
 }
 ```
 
