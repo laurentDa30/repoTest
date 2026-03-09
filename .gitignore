@@ -1,0 +1,20 @@
+# Dependencies
+app/vendor/
+rizom-v2/vendor/
+node_modules/
+
+# Environment files
+.env
+app/.env
+rizom-v2/.env
+
+# Laravel generated files
+*/bootstrap/cache/*.php
+*/storage/logs/
+*/database/*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
