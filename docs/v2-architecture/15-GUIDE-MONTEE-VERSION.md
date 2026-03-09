@@ -359,6 +359,10 @@ return Application::configure(basePath: dirname(__DIR__))
 | `protected $middlewareGroups = ['api' => [...]]` | `$middleware->group('api', [...])` |
 | `protected $routeMiddleware = [...]` | `$middleware->alias([...])` |
 
+### 5.3.1 Livewire
+Modifier les emit(), dispachEvent.. en dispatch les emitTo, emitUp sont pareil 
+Les transferts de donnée, doivent être faite au mieux en dispatch('nom', donnee: $donnee). Si on fait dispatch('nom', ['donnee' => $donnee]) dans le JS on récupère un tableau avec un index en plus event.detail.[0].donnee
+
 ### 5.4 Fichiers à supprimer après migration
 
 Ces fichiers hérités de Laravel 10 ne sont plus utilisés en Laravel 11 :
