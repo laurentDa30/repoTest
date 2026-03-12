@@ -336,9 +336,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'throttle'           => \Illuminate\Routing\Middleware\ThrottleRequests::class,
             'verified'           => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
             'admin'              => \App\Http\Middleware\IsAdmin::class,
-            'role'               => \Spatie\Permission\Middlewares\RoleMiddleware::class,
-            'permission'         => \Spatie\Permission\Middlewares\PermissionMiddleware::class,
-            'role_or_permission' => \Spatie\Permission\Middlewares\RoleOrPermissionMiddleware::class,
+            'role'               => \Spatie\Permission\Middleware\RoleMiddleware::class,
+            'permission'         => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
             'pageviews'          => \App\Http\Middleware\LogPageViews::class,
             'librenms.api'       => \App\Http\Middleware\LibrenmsApi::class,
             'team.access'        => \App\Http\Middleware\TeamAccessToRizom::class,
@@ -358,6 +358,12 @@ return Application::configure(basePath: dirname(__DIR__))
 | `protected $middlewareGroups = ['web' => [...]]` | `$middleware->group('web', [...])` |
 | `protected $middlewareGroups = ['api' => [...]]` | `$middleware->group('api', [...])` |
 | `protected $routeMiddleware = [...]` | `$middleware->alias([...])` |
+
+### 5.3.1 Livewire
+Modifier les emit(), dispachEvent.. en dispatch les emitTo, emitUp sont pareil 
+Les transferts de donnée, doivent être faite au mieux en dispatch('nom', donnee: $donnee). Si on fait dispatch('nom', ['donnee' => $donnee]) dans le JS on récupère un tableau avec un index en plus event.detail.[0].donnee
+
+Modifier les noms de fichier dans les configs, BROADCASTING CACHE FILESYSTEM - ATTENTION .ENV
 
 ### 5.4 Fichiers à supprimer après migration
 
