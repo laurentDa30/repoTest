@@ -281,16 +281,17 @@ Cache::tags(['catalog'])->flush();
 2. Laravel 11 → 12 (changements mineurs)
 3. Utiliser **Laravel Shift** (service automatisé) pour les deux upgrades — économise des jours de travail
 
-### Livewire 2 → 3
-- Changement majeur de syntaxe (`$wire`, lifecycle hooks, `#[On]`, etc.)
+### Livewire 2 → 3 → 4
+- **2 → 3** : Changement majeur de syntaxe (`$wire`, lifecycle hooks, `#[On]`, etc.)
 - Migration composant par composant (les deux versions coexistent via `livewire:livewire` et `livewire:livewire3`)
 - Commencer par les composants les plus simples, finir par les plus complexes
+- **3 → 4** : Migration légère — rétro-compatible. Principaux changements : `wire:model` event bubbling, modifiers `.blur`/`.change`, `wire:scroll` → `wire:navigate:scroll`. Voir doc 15 étape 9 pour le détail.
 
 ## 4. Risques identifiés
 
 | Risque | Mitigation |
 |--------|------------|
-| Migration Livewire 2 → 3 plus longue que prévu | Coexistence des deux versions, migration progressive |
+| Migration Livewire 2 → 3 plus longue que prévu | Coexistence des deux versions, migration progressive. Passage 3→4 léger ensuite. |
 | Imports fournisseurs cassés pendant migration | Garder les imports existants fonctionnels, migrer vers les nouveaux jobs en parallèle |
 | Performance régression pendant le partitionnement CDR | Faire le partitionnement sur une copie, valider les performances, puis switch |
 | Perte de données CDR pendant l'archivage | Double-write vers agrégation + archive avant de supprimer les détails |

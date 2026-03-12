@@ -23,7 +23,7 @@ Cekoya est un opérateur télécom B2B en croissance (objectif : doubler le parc
 La V2 demande simultanément :
 - Maintenance V1 (bugs, évolutions urgentes)
 - Développement V2 (migration progressive)
-- Montée en compétences (Docker, Livewire 3, Tailwind, CI/CD)
+- Montée en compétences (Docker, Livewire 4, Tailwind, CI/CD)
 
 **Recommandation** : Allouer un ratio **70% V2 / 30% maintenance V1**. Si la maintenance V1 dépasse 40%, c'est un signal d'alarme — il faut soit recruter, soit réduire le scope V2.
 
@@ -49,7 +49,7 @@ L'ordre de migration doit être guidé par l'**impact business**, pas par la fac
 | 🟠 P1 | **Sync catalogue + SSO** | Rendre le Hub central opérationnel pour les super-admins |
 | 🟡 P2 | **Catalogue** | Structurant, désormais géré centralement et synchronisé vers les régions |
 | 🟡 P2 | **Gestion clients** | Volume de code important mais moins critique |
-| 🟢 P3 | **Portail client** (Livewire 3) | UX importante mais secondaire par rapport au coeur opérationnel |
+| 🟢 P3 | **Portail client** (Livewire 4) | UX importante mais secondaire par rapport au coeur opérationnel |
 | 🟢 P3 | **Portail ambassadeur** | Plus petit périmètre, peut attendre |
 | 🟢 P3 | **Module Environnement** | Non critique pour le business telecom |
 | 🟢 P3 | **Provisioning auto de régions** | Automatisation de la création d'une nouvelle agence régionale |
@@ -155,7 +155,7 @@ Phase V2 complète :
 | Point | Consensus |
 |-------|-----------|
 | Architecture monolithe modulaire | ✅ Unanime — microservices seraient suicidaires avec 2 devs |
-| Laravel 12 + Livewire 3 (tous portails) | ✅ Unanime — stack unifiée, productivité maximale pour 2 devs backend-first |
+| Laravel 12 + Livewire 4 (tous portails) | ✅ Unanime — stack unifiée, productivité maximale pour 2 devs backend-first |
 | MySQL 8 (pas PostgreSQL) | ✅ Majoritaire — cybersécurité préfère PG (meilleures options de chiffrement), arbitrage : le coût de migration + apprentissage ne justifie pas le gain |
 | Scaleway | ✅ Unanime — meilleur rapport service/coût/souveraineté |
 | Migration progressive | ✅ Unanime — big-bang = mort du projet |
@@ -167,8 +167,8 @@ Phase V2 complète :
 - **Pour MySQL** (architecte, backend, DevOps) : maîtrisé par l'équipe, partitionnement natif suffisant, pas de migration à risque, écosystème Laravel optimisé pour MySQL
 - **Arbitrage** : MySQL 8 — le risque de migration de base de données est disproportionné par rapport au gain pour cette volumétrie
 
-### ~~Désaccord 2~~ — Résolu : Tout Livewire 3
-- **Décision unanime** : stack unifiée **Livewire 3 + Alpine.js + Tailwind CSS** pour tous les portails (admin, client, ambassadeur, Hub central)
-- **Raisons** : équipe de 2 devs backend-first, Livewire 3 couvre tous les besoins (lazy loading, `wire:navigate` pour navigation SPA-like, composants imbriqués), zéro courbe d'apprentissage Vue/Inertia
+### ~~Désaccord 2~~ — Résolu : Tout Livewire 4
+- **Décision unanime** : stack unifiée **Livewire 4 + Alpine.js + Tailwind CSS** pour tous les portails (admin, client, ambassadeur, Hub central)
+- **Raisons** : équipe de 2 devs backend-first, Livewire 4 couvre tous les besoins (lazy loading, `wire:navigate` pour navigation SPA-like, Islands, Single-File Components, composants imbriqués), zéro courbe d'apprentissage Vue/Inertia
 - **API REST** maintenue en parallèle pour intégrations partenaires et future app mobile — Livewire et l'API ne sont pas exclusifs
 - **Pas de duplication** : un seul jeu de composants Blade partagé par tous les portails

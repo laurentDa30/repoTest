@@ -85,7 +85,7 @@ class DetectLineAnomaliesJob implements ShouldQueue
 }
 ```
 
-### Page Erreurs (Livewire 3)
+### Page Erreurs (Livewire 4)
 
 La page `/admin/errors/lines` affiche toutes les anomalies détectées, filtrables par :
 - Type d'anomalie

@@ -1,13 +1,17 @@
-# Guide de Montée de Version — Laravel 10 → Laravel 11 / Livewire 2 → 3
+# Guide de Montée de Version — Laravel 10 → 11 / Livewire 2 → 3 → 4
 
 ## Prérequis
 
-| Élément | V1 actuelle | V2 cible |
-|---------|-------------|----------|
-| PHP | 8.1+ | 8.2+ (recommandé 8.3) |
-| Laravel | 10.x | 11.x |
-| Livewire | 2.x | 3.x |
-| MySQL | 5.7+ | 8.0+ |
+| Élément | V1 actuelle | Cible intermédiaire | V2 cible finale |
+|---------|-------------|---------------------|-----------------|
+| PHP | 8.1+ | 8.2+ | 8.2+ (recommandé 8.4) |
+| Laravel | 10.x | 11.x | 12.x |
+| Livewire | 2.x | 3.x | **4.x** |
+| MySQL | 5.7+ | 8.0+ | 8.0+ |
+
+> **Stratégie** : La migration se fait en deux temps.
+> Étapes 1-8 couvrent Laravel 10→11 et Livewire 2→3.
+> Étape 9 couvre Livewire 3→4 (migration légère, rétro-compatible).
 
 ---
 
@@ -40,7 +44,7 @@
       "zanysoft/laravel-zip": "^3.0",
       "guzzlehttp/guzzle": "^7.8",
         "nunomaduro/termwind": "^2.0",
-        "livewire/livewire": "^3.4",
+        "livewire/livewire": "^4.0",
         "laravel/dusk": "^8.0",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.9",
@@ -456,6 +460,148 @@ ou mettre une valeur par défaut dans `config/backup.php`
 
 ---
 
+## Étape 9 — Livewire 3 → 4
+
+> **Prérequis** : Étapes 1-8 terminées (Laravel 11+, Livewire 3 fonctionnel).
+> Livewire 4 est sorti en janvier 2026. La migration depuis la v3 est **légère** —
+> la plupart des composants existants fonctionnent sans modification.
+
+### 9.1 Mise à jour Composer
+
+```bash
+composer require livewire/livewire:^4.0
+php artisan optimize:clear
+```
+
+### 9.2 Breaking changes à corriger
+
+#### 9.2.1 `wire:model` — Event bubbling supprimé
+
+En v3, `wire:model` sur un conteneur capturait les événements `input`/`change` des éléments enfants.
+En v4, `wire:model` n'écoute que les événements directement émis sur l'élément lui-même.
+
+```blade
+{{-- Si vous utilisiez wire:model sur un conteneur parent --}}
+
+{{-- V3 : fonctionnait (event bubbling) --}}
+<div wire:model="selected">
+    <input type="radio" value="a" />
+    <input type="radio" value="b" />
+</div>
+
+{{-- V4 : ajouter .deep pour restaurer le comportement --}}
+<div wire:model.deep="selected">
+    <input type="radio" value="a" />
+    <input type="radio" value="b" />
+</div>
+```
+
+> **Note** : Les usages standards (`wire:model` sur `<input>`, `<select>`, `<textarea>`)
+> ne sont **pas affectés**.
+
+#### 9.2.2 `wire:model` — Modifiers `.blur` / `.change`
+
+En v3, les modifiers `.blur` et `.change` contrôlaient uniquement l'envoi réseau —
+la valeur côté client se mettait à jour immédiatement.
+
+En v4, ces modifiers contrôlent **aussi** la synchro côté client.
+
+```blade
+{{-- V3 : la valeur s'affiche en temps réel, envoi au blur --}}
+<input wire:model.blur="name" />
+
+{{-- V4 : la valeur ne se met à jour qu'au blur aussi côté client --}}
+{{-- Pour retrouver le comportement V3, ajouter .live : --}}
+<input wire:model.live.blur="name" />
+```
+
+#### 9.2.3 `wire:scroll` renommé
+
+```blade
+{{-- V3 --}}
+<div wire:scroll>...</div>
+
+{{-- V4 --}}
+<div wire:navigate:scroll>...</div>
+```
+
+#### 9.2.4 Tags de composants — fermeture obligatoire
+
+En v4, les composants Livewire **doivent** être correctement fermés (support des slots).
+
+```blade
+{{-- V3 : fonctionnait même sans fermeture --}}
+<livewire:search-bar />
+
+{{-- V4 : toujours OK avec auto-fermeture --}}
+<livewire:search-bar />
+
+{{-- V4 : si contenu (slot), fermeture obligatoire --}}
+<livewire:card>
+    <p>Contenu du slot</p>
+</livewire:card>
+```
+
+#### 9.2.5 JavaScript Hooks → Interceptors
+
+```javascript
+// V3
+Livewire.hook('commit', ({ component, commit, respond }) => { ... })
+Livewire.hook('request', ({ uri, options }) => { ... })
+
+// V4
+Livewire.interceptMessage(({ component, message }) => { ... })
+Livewire.interceptRequest(({ uri, options }) => { ... })
+```
+
+### 9.3 Routing — `Route::livewire()` (recommandé en v4)
+
+Pour les full-page components, v4 recommande `Route::livewire()` :
+
+```php
+// V3
+Route::get('/dashboard', DashboardComponent::class);
+
+// V4 (recommandé, obligatoire pour les Single-File Components)
+Route::livewire('/dashboard', DashboardComponent::class);
+```
+
+> Les anciennes routes continuent de fonctionner pour les composants classiques (class-based).
+
+### 9.4 Nouvelles fonctionnalités disponibles (optionnel)
+
+Ces fonctionnalités sont **opt-in** — pas besoin de les adopter immédiatement :
+
+| Fonctionnalité | Description | Priorité |
+|---|---|---|
+| **Single-File Components** | PHP + Blade + JS dans un seul fichier `.blade.php` | Nouveaux composants |
+| **Islands** | Zones isolées qui se re-rendent indépendamment | Performance listes |
+| **Parallel Requests** | `wire:model.live` en requêtes parallèles | Auto (rien à faire) |
+| **Slots natifs** | Livewire components acceptent des `<slot>` comme Blade | Refacto UI |
+| **`wire:ref`** | Cibler un composant enfant directement | Communication parent→enfant |
+| **`wire:transition`** | Animations déclaratives à l'entrée/sortie du DOM | UX |
+| **PHP 8.4 Property Hooks** | `set => max(1, $value)` remplace les hooks `updating` | Simplification code |
+
+### 9.5 Outil de migration automatique
+
+[Laravel Shift](https://laravelshift.com/upgrade-livewire-3-to-livewire-4) propose un Livewire 4.x Shift
+qui automatise les changements (renommages, config, modifiers).
+
+### 9.6 Checklist Livewire 3 → 4
+
+- [ ] `composer require livewire/livewire:^4.0` sans erreur
+- [ ] `php artisan optimize:clear` exécuté
+- [ ] Rechercher `wire:model.blur` et `wire:model.change` → ajouter `.live` si comportement temps réel attendu
+- [ ] Rechercher `wire:model` sur des éléments conteneurs (non-input) → ajouter `.deep` si nécessaire
+- [ ] Rechercher `wire:scroll` → remplacer par `wire:navigate:scroll`
+- [ ] Vérifier que tous les tags `<livewire:...>` sont correctement fermés
+- [ ] Rechercher `Livewire.hook(` dans le JS → migrer vers `interceptMessage` / `interceptRequest`
+- [ ] Mettre à jour `config/livewire.php` (layout namespace `layouts::`)
+- [ ] Tests manuels sur les composants critiques (formulaires, modales, tableaux)
+- [ ] `php artisan test` passe
+
+---
+
 ## Historique des modifications
 
 | Date | Modification |
@@ -463,3 +609,4 @@ ou mettre une valeur par défaut dans `config/backup.php`
 | 2026-03-09 | Création du guide — Fix spatie/laravel-backup notification email |
 | 2026-03-09 | Ajout suppression bengels/laravel-email-exceptions, refactoring disques SFTP Transatel |
 | 2026-03-09 | Ajout migration Kernel.php → bootstrap/app.php (étape 5) |
+| 2026-03-12 | Ajout étape 9 — Migration Livewire 3 → 4 (breaking changes, nouvelles features, checklist) |

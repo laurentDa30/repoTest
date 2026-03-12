@@ -25,14 +25,14 @@
 3. **Pas de lazy loading** des composants lourds
 4. **Pas de recherche globale performante** (Laravel Scout + database driver résoudra côté back)
 
-## 2. Stratégie Frontend — Stack unifiée Livewire 3 + Alpine.js + Tailwind
+## 2. Stratégie Frontend — Stack unifiée Livewire 4 + Alpine.js + Tailwind
 
-### Décision : tout Livewire 3 (pas d'Inertia / Vue 3)
+### Décision : tout Livewire 4 (pas d'Inertia / Vue 3)
 
 **Justification** :
 - **Équipe de 2 développeurs backend-first** → une seule stack à maîtriser, pas de courbe d'apprentissage Vue/Inertia
-- **Zéro build JS complexe** → Livewire 3 + Alpine.js ne nécessitent pas de pipeline frontend lourd
-- **Livewire 3 couvre tous les cas** : lazy loading natif, navigation SPA-like (`wire:navigate`), interactivité riche
+- **Zéro build JS complexe** → Livewire 4 + Alpine.js ne nécessitent pas de pipeline frontend lourd
+- **Livewire 4 couvre tous les cas** : lazy loading natif, navigation SPA-like (`wire:navigate`), Single-File Components, Islands, interactivité riche
 - **Composants partagés** entre tous les portails → un seul jeu de composants Blade/Livewire
 - **Tailwind CSS** remplace Bootstrap : plus léger, plus maintenable, design system intégré
 - **Alpine.js** couvre les interactions client-side légères (dropdowns, modals, toggles)
@@ -40,7 +40,7 @@
 ### Portail Admin régional ({region}.cekoya.fr) + Hub central (central.cekoya.fr)
 
 ```html
-<!-- Exemple : composant Livewire 3 pour la liste des lignes -->
+<!-- Exemple : composant Livewire 4 pour la liste des lignes -->
 <div>
     <!-- Recherche avec debounce -->
     <input wire:model.live.debounce.300ms="search"
@@ -72,12 +72,13 @@
 </div>
 ```
 
-### Portails Client et Ambassadeur ({region}-client.cekoya.fr / {region}-amba.cekoya.fr) → Livewire 3
+### Portails Client et Ambassadeur ({region}-client.cekoya.fr / {region}-amba.cekoya.fr) → Livewire 4
 
 **Justification** :
 - Les portails client/ambassadeur sont des interfaces **publiques** (utilisateurs externes)
 - Chaque portail est automatiquement scopé à la région via stancl/tenancy (sous-domaine → BDD)
-- Livewire 3 avec `wire:navigate` offre une **navigation SPA-like** sans JavaScript custom
+- Livewire 4 avec `wire:navigate` offre une **navigation SPA-like** sans JavaScript custom
+- Les **Islands** (v4) permettent de re-rendre des zones indépendantes → performance optimale sur les dashboards
 - Les interactions complexes (configurateur de forfait) sont gérées via **composants Livewire imbriqués + Alpine.js**
 - L'API REST `/api/v1/*` reste disponible si besoin futur (app mobile, partenaires)
 
@@ -113,7 +114,7 @@
 | Taille du bundle | ~200 Ko (avec JS) | ~10 Ko (purgé) |
 | Personnalisation | Override complexe | Configuration native |
 | Cohérence | Dépend de la discipline | Forcée par le design system |
-| Compatibilité Livewire 3 | OK | Natif (recommandé par Laravel) |
+| Compatibilité Livewire 4 | OK | Natif (recommandé par Laravel) |
 | Composants prêts | Bootstrap UI (générique) | Headless UI + Tailwind UI |
 
 ### Bibliothèque de composants (100% Blade/Livewire)
@@ -157,7 +158,7 @@ resources/
 - ApexCharts est plus adapté aux dashboards complexes (finance, CDR analytics)
 - Meilleure gestion du temps réel (mise à jour de données en live)
 - Responsive natif, dark mode, export PNG/SVG/CSV intégrés
-- Compatible Livewire 3 (via Alpine.js wrapper)
+- Compatible Livewire 4 (via Alpine.js wrapper)
 
 ## 4. Remplacement de Pusher → Laravel Reverb
 
@@ -210,11 +211,11 @@ Echo.private('admin.imports')
 
 ### Optimisations
 
-1. **Livewire 3 lazy loading** : les composants lourds (graphiques, tables longues) chargés à la demande
+1. **Livewire 4 lazy loading + Islands** : les composants lourds (graphiques, tables longues) chargés à la demande, Islands pour re-render indépendant
 2. **Vite** pour le bundling (déjà par défaut Laravel 12) — remplacement de Mix si encore utilisé
 3. **Images optimisées** : WebP, lazy loading natif
 4. **Pagination côté serveur** : jamais charger des milliers de lignes côté client
-5. **`wire:navigate`** : navigation SPA-like native Livewire 3, préchargement au survol des liens
+5. **`wire:navigate`** : navigation SPA-like native Livewire 4, préchargement au survol des liens
 
 ```html
 <!-- Navigation SPA-like sans JavaScript custom -->
@@ -242,7 +243,7 @@ Echo.private('admin.imports')
 |--------|------------|
 | Coexistence Bootstrap/Tailwind crée de la confusion | Convention stricte : nouveau = Tailwind, ancien = migré progressivement |
 | ApexCharts plus lourd que Chart.js | Lazy loading des graphiques via Livewire `lazy` |
-| Livewire 3 moins performant que SPA pour interactions complexes | `wire:navigate` + Alpine.js comblent l'écart, l'API REST reste dispo pour futur besoin SPA |
+| Livewire 4 moins performant que SPA pour interactions très complexes | `wire:navigate` + Islands + Alpine.js comblent l'écart, l'API REST reste dispo pour futur besoin SPA |
 | Composants Livewire trop lourds (N+1 queries) | Optimisation backend (eager loading, agrégation), `$this->authorize()` par composant |
 
 ---
@@ -250,7 +251,7 @@ Echo.private('admin.imports')
 # 🔍 Revue croisée Backend
 
 ## Points validés
-- La stack unifiée **tout Livewire 3 + Alpine.js** est le choix le plus pragmatique pour 2 devs backend-first
+- La stack unifiée **tout Livewire 4 + Alpine.js** est le choix le plus pragmatique pour 2 devs backend-first
 - Laravel Reverb comme remplacement de Pusher est le bon choix — natif, gratuit, maintenu par Laravel
 - ApexCharts est un bon upgrade pour les dashboards complexes
 - **Zéro duplication de composants** : un seul jeu de composants Blade partagé par tous les portails
@@ -267,7 +268,7 @@ Echo.private('admin.imports')
 > Le Hub central affiche un dashboard agrégé de toutes les régions (via `regional_summaries`). Chaque carte de région est cliquable → SSO vers l'admin régional. Le même design system Tailwind est utilisé pour le Hub et les régions.
 
 ### 4. Navigation SPA-like avec wire:navigate
-> Livewire 3 avec `wire:navigate` offre une navigation sans rechargement de page complet, similaire à une SPA. Les assets ne sont pas rechargés, seul le contenu change. Cela résout le principal avantage qu'aurait eu Inertia/Vue.
+> Livewire 4 avec `wire:navigate` offre une navigation sans rechargement de page complet, similaire à une SPA. Les assets ne sont pas rechargés, seul le contenu change. Les **Islands** permettent en plus de re-rendre des zones indépendantes sans toucher au reste. Cela résout le principal avantage qu'aurait eu Inertia/Vue.
 
 ## Verdict
-Stratégie frontend **cohérente et optimale pour 2 devs backend-first**. La stack unifiée Livewire 3 + Alpine.js + Tailwind élimine toute complexité inutile tout en offrant une UX moderne.
+Stratégie frontend **cohérente et optimale pour 2 devs backend-first**. La stack unifiée Livewire 4 + Alpine.js + Tailwind élimine toute complexité inutile tout en offrant une UX moderne. Le moteur **Blaze** (v4) réduit les mises à jour DOM de 60% par rapport à la v3.

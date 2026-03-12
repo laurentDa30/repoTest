@@ -112,7 +112,7 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 
 | # | Point | Decision | Date |
 |---|-------|----------|------|
-| - | Stack frontend : Livewire 3 vs Inertia/Vue | Livewire 3 + Alpine.js (unanime) | - |
+| - | Stack frontend : Livewire 4 vs Inertia/Vue | Livewire 4 + Alpine.js (unanime) | - |
 | - | MySQL vs PostgreSQL | MySQL 8 (majoritaire) | - |
 | - | Cloud provider | Scaleway (unanime) | - |
 | - | Architecture | Monolithe modulaire DDD-lite (unanime) | - |

@@ -219,7 +219,7 @@ final readonly class CreateClientDTO
 
 ---
 
-## 4. Conventions Frontend (Livewire 3 + Tailwind)
+## 4. Conventions Frontend (Livewire 4 + Tailwind)
 
 ### Composants Livewire
 - Un composant = une responsabilité

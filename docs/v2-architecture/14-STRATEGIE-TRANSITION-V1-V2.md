@@ -4,7 +4,7 @@
 
 | Élément | V1 actuelle | V2 cible |
 |---------|-------------|----------|
-| Stack | Laravel 10, Livewire 2, Blade, Bootstrap, MySQL | Laravel 12, Livewire 3, Tailwind, MySQL 8 multi-BDD |
+| Stack | Laravel 10, Livewire 2, Blade, Bootstrap, MySQL | Laravel 12, Livewire 4, Tailwind, MySQL 8 multi-BDD |
 | Architecture | Monolithe couplé, 3 portails dans 1 app | Monolithe modulaire DDD-lite, API-first, multi-région |
 | Hébergement | On-premise (serveur local) | Scaleway cloud (Docker) |
 | Multi-tenancy | Aucun | stancl/tenancy v3 (database-per-tenant, Hub & Spoke) |
@@ -50,7 +50,7 @@ V1 (existante)                    V2 (nouveau projet)
 | **Aucun risque de régression V1** | Les deux systèmes sont totalement indépendants. La V1 continue de tourner pendant le développement. |
 | **Nommage et conventions idéaux** | Pas besoin de supporter les noms de colonnes historiques, pas de colonnes `_bkp`, pas de `GENERATED STORED`. |
 | **Multi-tenant natif** | stancl/tenancy configuré dès le début, pas d'ajustement rétroactif. |
-| **Liberté technologique totale** | Livewire 3, Tailwind, Alpine.js, Reverb, Scout... tout en partant de zéro, zéro coexistence. |
+| **Liberté technologique totale** | Livewire 4, Tailwind, Alpine.js, Reverb, Scout... tout en partant de zéro, zéro coexistence. |
 
 ### Contre
 
@@ -339,7 +339,7 @@ Le dossier `app/` contient déjà un projet Laravel 12 avec :
 - Migrations centrales (tenants, domains) et tenant (clients, collaborators, lines, sims, devices, telecom_types)
 - Config multi-tenant complète (bootstrappers DB, cache, filesystem, queue)
 
-Le dossier `rizom-v2/` contient un template standalone Laravel 12 avec les packages cibles (Livewire 3, Spatie, Snappy PDF, Excel, etc.).
+Le dossier `rizom-v2/` contient un template standalone Laravel 12 avec les packages cibles (Livewire 4, Spatie, Snappy PDF, Excel, etc.).
 
 **La base V2 est déjà posée**. La prochaine étape est de connecter ce squelette à la BDD V1 existante.
 
@@ -370,14 +370,14 @@ Phase 1 (2-3 mois)
 
 Phase 2 (2-3 mois)
 ├── Modules DDD-lite (Client, Telecom, Billing, Catalog, Stock, CDR)
-├── Livewire 3 migration complète
+├── Livewire 4 migration complète (2→3→4)
 ├── Tailwind CSS (remplacement Bootstrap)
 ├── Cloud production
 ├── Provisioning 2ème région (PACA)
 └── Nettoyage BDD (tables _bkp, pricing_zones)
 
 Phase 3 (2-3 mois)
-├── Portails client + ambassadeur en Livewire 3
+├── Portails client + ambassadeur en Livewire 4
 ├── Dashboard Hub central
 ├── Provisioning automatisé de régions
 ├── Tests E2E + pen test
@@ -394,7 +394,7 @@ Phase 3 (2-3 mois)
 
 ### PHASE 0 — Fondations techniques (1 mois, ~20 jours de dev)
 
-**Objectif** : Moderniser la stack sans toucher à la logique métier. À la fin de Phase 0, la V1 tourne sur Laravel 12, Livewire 3, Docker, Redis, avec CI/CD et multi-tenancy configuré. Les utilisateurs ne voient **aucune différence**.
+**Objectif** : Moderniser la stack sans toucher à la logique métier. À la fin de Phase 0, la V1 tourne sur Laravel 12, Livewire 4 (migration 2→3→4), Docker, Redis, avec CI/CD et multi-tenancy configuré. Les utilisateurs ne voient **aucune différence**.
 
 #### Étape 0.1 — Préparer la branche de travail (0,5 jour)
 
@@ -574,15 +574,15 @@ Pour chaque composant :
 └── Commit unitaire par composant migré
 ```
 
-**Pré-requis** : étape 0.2 (Laravel 12 requis pour Livewire 3)
-**Livrable** : tous les composants Livewire fonctionnent en v3
+**Pré-requis** : étape 0.2 (Laravel 12 requis pour Livewire 3+)
+**Livrable** : tous les composants Livewire fonctionnent en v3, puis montée rapide en v4 (voir doc 15 étape 9)
 **Rollback** : composant par composant (git revert du commit spécifique)
 
 ---
 
 #### Étape 0.4 — Autres packages à mettre à jour (1-2 jours)
 
-Après Laravel 12 + Livewire 3, vérifier et mettre à jour les packages restants :
+Après Laravel 12 + Livewire 4, vérifier et mettre à jour les packages restants :
 
 ```bash
 composer update --with-all-dependencies
@@ -843,7 +843,7 @@ L'audit trail enregistre automatiquement les modifications sur les modèles crit
 
 ```
 □ Laravel 12 installé, php artisan test passe
-□ Livewire 3 : tous les composants migrés et fonctionnels
+□ Livewire 4 : tous les composants migrés et fonctionnels (2→3→4)
 □ Tous les packages Composer compatibles et à jour
 □ Docker : docker compose up démarre l'environnement complet
 □ Redis : sessions, cache, queues fonctionnent
@@ -1119,7 +1119,7 @@ Points clés :
 - Versioning : préfixe `/api/v1/` dans l'URL
 
 L'API interne est consommée par :
-- Les composants Livewire 3 (via appels HTTP internes)
+- Les composants Livewire 4 (via appels HTTP internes)
 - Le futur portail client (Phase 3)
 - Le Hub central pour les agrégations cross-région
 
@@ -1411,7 +1411,7 @@ Pages :
 - Profil : paramètres compte, mot de passe
 - Notifications : alertes dépassement, messages admin
 
-Tout en Livewire 3 + Tailwind + Alpine.js. Le portail consomme l'API v1 interne (construite en Phase 1).
+Tout en Livewire 4 + Tailwind + Alpine.js. Le portail consomme l'API v1 interne (construite en Phase 1).
 
 ---
 
@@ -1540,7 +1540,7 @@ Documentation OpenAPI/Swagger générée automatiquement depuis les Form Request
 
 ```
 PHASE 0 (séquentiel obligatoire) :
-0.1 Branche ──→ 0.2 Laravel 12 ──→ 0.3 Livewire 3 ──→ 0.4 Packages
+0.1 Branche ──→ 0.2 Laravel 12 ──→ 0.3 Livewire 3→4 ──→ 0.4 Packages
                                                               │
 0.5 Docker ──→ 0.6 Redis ──→ 0.7 CI/CD                      │
                     │                                          │
@@ -1584,7 +1584,7 @@ Le dossier `app/` dans ce repo sert de **prototype / POC** pour valider :
 
 Ce POC sera **fusionné dans le codebase V1 réel** (sur GitLab) lors de la Phase 0. Le code du POC sert de référence pour la configuration, pas de base de code production.
 
-Le dossier `rizom-v2/` sert de **template de référence** pour les packages cibles (composer.json) et la structure frontend (Livewire 3, Tailwind, etc.).
+Le dossier `rizom-v2/` sert de **template de référence** pour les packages cibles (composer.json) et la structure frontend (Livewire 4, Tailwind, etc.).
 
 ---
 
@@ -1616,7 +1616,7 @@ Packages de référence (à porter dans le codebase V1 lors de la Phase 0-1) :
 ├── barryvdh/laravel-snappy       → Génération PDF (factures)
 ├── digitick/sepa-xml             → Prélèvements SEPA
 ├── intervention/validation       → Validation images/documents
-├── livewire/livewire             → Livewire 3 (frontend)
+├── livewire/livewire             → Livewire 4 (frontend)
 ├── maatwebsite/excel             → Exports Excel
 ├── spatie/laravel-activitylog    → Audit trail (OBLIGATOIRE)
 ├── spatie/laravel-backup         → Backups automatisés

@@ -277,7 +277,7 @@ Règles complémentaires :
 │                   Laravel 12                         │
 │                                                      │
 │  ┌──────────────────────┐  ┌──────────────────┐    │
-│  │     Livewire 3       │  │   API REST       │    │
+│  │     Livewire 4       │  │   API REST       │    │
 │  │ (Admin + Client +    │  │   /api/v1/*      │    │
 │  │  Ambassadeur)        │  │   (mobile, etc.) │    │
 │  └──────────┬───────────┘  └────────┬─────────┘    │
@@ -412,8 +412,8 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 
 > **Priorisation** :
 > - Court terme (0-3 mois) : Dockerisation, CI/CD, quick wins CDR (`client_id` + agrégation), Redis, Laravel 12, **install stancl/tenancy + BDD centrale**
-> - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 3, **sync catalogue + SSO**
-> - Long terme (6-12 mois) : Portails client/amba Livewire 3, migration cloud, **provisioning auto de régions**, scaling
+> - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 4, **sync catalogue + SSO**
+> - Long terme (6-12 mois) : Portails client/amba Livewire 4, migration cloud, **provisioning auto de régions**, scaling
 
 ---
 

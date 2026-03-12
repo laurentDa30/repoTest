@@ -31,7 +31,7 @@
                     │ │ Laravel 12 │ │  │ │ Laravel │ │ │
                     │ │ + stancl/  │ │  │ │ 12      │ │ │
                     │ │   tenancy  │ │  │ │ +tenant │ │ │
-                    │ │ Livewire 3 │ │  │ │         │ │ │
+                    │ │ Livewire 4 │ │  │ │         │ │ │
                     │ └────────────┘ │  │ └─────────┘ │ │
                     └────────────────┘  └─────────────┘ │
                                                         │
@@ -86,10 +86,10 @@
 ### Routing des portails (multi-région)
 
 ```
-central.cekoya.fr            ──► Hub Central (Livewire 3)    ──► MW: super_admin + MFA
-{region}.cekoya.fr           ──► Admin régional (Livewire 3) ──► MW: tenant + admin + MFA
-{region}-client.cekoya.fr    ──► Portail client (Livewire 3) ──► MW: tenant + client auth
-{region}-amba.cekoya.fr      ──► Portail ambass. (Livewire 3)──► MW: tenant + ambassador auth
+central.cekoya.fr            ──► Hub Central (Livewire 4)    ──► MW: super_admin + MFA
+{region}.cekoya.fr           ──► Admin régional (Livewire 4) ──► MW: tenant + admin + MFA
+{region}-client.cekoya.fr    ──► Portail client (Livewire 4) ──► MW: tenant + client auth
+{region}-amba.cekoya.fr      ──► Portail ambass. (Livewire 4)──► MW: tenant + ambassador auth
 api.cekoya.fr                ──► Laravel API REST             ──► MW: Sanctum + throttle + tenant
 ```
 
@@ -121,10 +121,10 @@ Même application Laravel, **routage par domaine** (stancl/tenancy identifie le 
 ### Frontend (stack unifiée)
 | Composant | Technologie | Portail |
 |-----------|------------|---------|
-| Hub central | Livewire 3 + Alpine.js | central.cekoya.fr |
-| Admin régional | Livewire 3 + Alpine.js | {region}.cekoya.fr |
-| Client UI | Livewire 3 + Alpine.js | {region}-client.cekoya.fr |
-| Ambassador UI | Livewire 3 + Alpine.js | {region}-amba.cekoya.fr |
+| Hub central | Livewire 4 + Alpine.js | central.cekoya.fr |
+| Admin régional | Livewire 4 + Alpine.js | {region}.cekoya.fr |
+| Client UI | Livewire 4 + Alpine.js | {region}-client.cekoya.fr |
+| Ambassador UI | Livewire 4 + Alpine.js | {region}-amba.cekoya.fr |
 | CSS Framework | Tailwind CSS 4 | Tous |
 | Charts | ApexCharts | Tous |
 | Build tool | Vite | Tous |
@@ -387,7 +387,7 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 | Module Stock | Gestion stock + SIMs | 2-3 jours |
 | Nettoyage BDD | Supprimer tables `_bkp`, finaliser `plan_rates` vs `pricing_zones` | 1-2 jours |
 | Tailwind CSS migration (début) | Nouveaux composants en Tailwind, coexistence Bootstrap | Continu |
-| Livewire 3 migration complète | Tous les composants admin + Hub central | Continu |
+| Livewire 4 migration complète | Tous les composants admin + Hub central | Continu |
 | Migration cloud production | Bascule DNS (wildcard), blue-green | 2-3 jours |
 | Provisioning 2ème région | Tester le workflow complet d'ajout de région | 2-3 jours |
 
@@ -400,8 +400,8 @@ Mois 0─1          Mois 1─4          Mois 4─7          Mois 7─10
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Portail client Livewire 3 | Dashboard, lignes, consommation, factures (scopé par tenant) | 7-10 jours |
-| Portail ambassadeur Livewire 3 | Dashboard, paiements, historique (scopé par tenant) | 3-5 jours |
+| Portail client Livewire 4 | Dashboard, lignes, consommation, factures (scopé par tenant) | 7-10 jours |
+| Portail ambassadeur Livewire 4 | Dashboard, paiements, historique (scopé par tenant) | 3-5 jours |
 | Dashboard Hub central | Vue synthétique multi-régions + SSO | 3-5 jours |
 | Suppression Bootstrap | Migration Tailwind complète | 3-5 jours |
 | Module Environnement (refacto) | RSE, émissions, captation | 3-5 jours |
@@ -446,7 +446,7 @@ Q1 (Mois 0-3)                    Q2 (Mois 3-6)                 Q3 (Mois 6-9)    
 │ ✓ Laravel 12 upgrade     │ │   (Domain/App/Infra)     │ │ ✓ Portail ambass. LW3    │ │ ✓ Pen test (cross-tenant)│
 │ ✓ stancl/tenancy setup   │ │ ✓ Refonte invoices       │ │ ✓ Dashboard Hub central  │ │ ✓ Tests E2E              │
 │ ✓ Redis (cache+queues)   │ │   (sortie JSON blob)     │ │ ✓ Suppression Bootstrap  │ │ ✓ Provisioning auto      │
-│ ✓ Monitoring (Pulse+     │ │ ✓ Livewire 3 complet     │ │ ✓ Module Environnement   │ │   de régions             │
+│ ✓ Monitoring (Pulse+     │ │ ✓ Livewire 4 complet     │ │ ✓ Module Environnement   │ │   de régions             │
 │   Sentry)                │ │ ✓ Sync catalogue + SSO   │ │ ✓ Module Content         │ │ ✓ Optimisation perf      │
 │ ✓ Quick win CDR          │ │ ✓ Migration cloud prod   │ │ ✓ API documentation      │ │ ✓ Recrutement dev #3     │
 │   (client_id + agrég.)   │ │ ✓ Tailwind (début)       │ │ ✓ Nettoyage BDD (_bkp)   │ │ ✓ KPI review             │
