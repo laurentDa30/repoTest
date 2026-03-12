@@ -363,6 +363,8 @@ return Application::configure(basePath: dirname(__DIR__))
 Modifier les emit(), dispachEvent.. en dispatch les emitTo, emitUp sont pareil 
 Les transferts de donnée, doivent être faite au mieux en dispatch('nom', donnee: $donnee). Si on fait dispatch('nom', ['donnee' => $donnee]) dans le JS on récupère un tableau avec un index en plus event.detail.[0].donnee
 
+Modifier les noms de fichier dans les configs, BROADCASTING CACHE FILESYSTEM - ATTENTION .ENV
+
 ### 5.4 Fichiers à supprimer après migration
 
 Ces fichiers hérités de Laravel 10 ne sont plus utilisés en Laravel 11 :
