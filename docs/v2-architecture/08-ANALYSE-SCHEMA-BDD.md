@@ -34,7 +34,7 @@ CREATE TABLE `invoices` (
 - La colonne `doc` (JSON) contient **l'intégralité** de la facture : en-tête, lignes de facturation, calculs, métadonnées, infos de paiement
 - Chaque `SELECT` charge potentiellement le JSON entier en mémoire, même si on ne veut que la date ou le montant
 - Les colonnes GENERATED STORED extraient quelques champs pour les index, mais le blob reste
-- La taille de `doc` est proportionnelle au nombre de lignes par client (un client avec 200 lignes = un JSON massif)
+- La taille de `doc` est proportionnelle au nombre de lignes par client (un client avec 500-1000+ lignes = un JSON de plusieurs centaines de Ko)
 - **C'est LA cause du problème de performance de la table `invoices`**
 
 **Impact** :
@@ -362,11 +362,21 @@ Le module Infogérance ne possède pas de tables propres pour le moment. Il s'ap
 
 **Impact technique** :
 ```
-Facture 1 client avec 200 lignes :
-- JSON doc ≈ 50-200 Ko par facture
-- 380 clients × 12 factures/an = 4 560 factures/an
-- Taille estimée après 3 ans : ~2.7 Go de JSON pur (sans index)
+Volumétrie réelle du JSON par facture :
+- Clients légers (~300) : ~20 lignes → JSON doc ≈ 5-20 Ko
+- Clients lourds (~80)  : 500-1000+ lignes → JSON doc ≈ 200-500 Ko par facture
+
+Volume total estimé :
+  Clients légers : 300 × 12 × ~10 Ko  =   36 Mo/an
+  Clients lourds :  80 × 12 × ~350 Ko = ~336 Mo/an
+                                  Total ≈  370 Mo/an de JSON pur
+
+  Sur 3 ans ≈ 1.1 Go
+  Sur 5 ans ≈ 1.9 Go (sans compter les index et colonnes GENERATED STORED)
+  Avec overhead (index + GENERATED + row format) : facilement 3-4 Go sur 5 ans
+
 - Chaque SELECT charge le JSON sauf si on utilise explicitement SELECT sans doc
+- Un SELECT * sur la facture d'un client lourd = 200-500 Ko chargés en mémoire par row
 ```
 
 **Problèmes** :
@@ -589,9 +599,16 @@ CREATE TABLE `invoices_v2` (
     FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- ⚠️ IMPORTANT : invoice_lines est PARTITIONNÉE par année (voir section détaillée plus bas)
+-- car la volumétrie est massive (~840K rows/an, 4.2M+ sur 5 ans).
+-- Le schéma simplifié ci-dessous montre la structure logique.
+-- Le DDL complet avec partitionnement est dans la section
+-- "Stratégie de partitionnement pour invoice_lines".
+
 CREATE TABLE `invoice_lines` (
     `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
     `invoice_id` bigint UNSIGNED NOT NULL,
+    `invoice_date` date NOT NULL,  -- Dénormalisé depuis invoices_v2.date (requis pour le partitionnement)
 
     -- Relation polymorphique (remplace line_id, service_id, device_id)
     -- Permet de lier une ligne de facture à N'IMPORTE QUEL modèle facturable
@@ -614,11 +631,22 @@ CREATE TABLE `invoice_lines` (
     `created_at` timestamp NULL DEFAULT NULL,
     `updated_at` timestamp NULL DEFAULT NULL,
 
-    PRIMARY KEY (`id`),
+    -- PK composite incluant la colonne de partition (contrainte MySQL)
+    PRIMARY KEY (`id`, `invoice_date`),
     KEY `idx_invoice` (`invoice_id`),
     KEY `idx_billable` (`billable_type`, `billable_id`),
-    FOREIGN KEY (`invoice_id`) REFERENCES `invoices_v2` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB;
+    KEY `idx_type_date` (`type`, `invoice_date`),
+    KEY `idx_invoice_date` (`invoice_id`, `invoice_date`)
+    -- ⚠️ Pas de FOREIGN KEY : MySQL interdit les FK sur tables partitionnées
+    -- La relation invoice_id → invoices_v2 est assurée par Laravel (belongsTo)
+) ENGINE=InnoDB
+PARTITION BY RANGE (YEAR(invoice_date)) (
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p2026 VALUES LESS THAN (2027),
+    PARTITION p2027 VALUES LESS THAN (2028),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
 
 -- Exemples d'utilisation Laravel :
 -- InvoiceLine::morphTo('billable') → Line, Device, ServiceSheet, ou tout futur modèle
@@ -629,6 +657,7 @@ CREATE TABLE `invoice_lines` (
 -- 2. Propre : pas de colonnes NULL inutiles (avant, 2 colonnes sur 3 étaient toujours NULL)
 -- 3. Pattern Laravel natif : déjà utilisé dans le projet (addresses, media, tags via Spatie)
 -- 4. Le champ `type` en varchar (pas enum) permet d'ajouter des types sans migration
+-- 5. invoice_date est rempli automatiquement via un event Laravel (voir section partitionnement)
 ```
 
 #### Stratégie de migration — NE PAS modifier la table existante
@@ -670,8 +699,9 @@ Phase D — Bascule finale (quand V1 éteinte)
 - Le risque de régression est minimal : la V1 ne change pas, la V2 utilise ses propres tables
 
 **Gain estimé** :
-- `invoices_v2` sans JSON : quelques Mo au lieu de Go
-- `invoice_lines` : requêtable, indexable, analysable
+- `invoices_v2` sans JSON : quelques Mo au lieu de 3-4 Go (le JSON blob disparaît)
+- `invoice_lines` : requêtable, indexable, analysable — partitionnée par année pour gérer les 840K+ rows/an
+- Un client lourd (500-1000+ lignes/facture) : requête passant de "parse JSON 200-500 Ko en mémoire" à "SELECT sur index B-tree avec partition pruning"
 - Les dashboards financiers deviennent instantanés
 
 #### Faut-il partitionner `invoices_v2` et `invoice_lines` ?
@@ -904,6 +934,7 @@ La table `sims` a `client_id` et `line_id` mais pas de lien direct vers `collabo
 | 🔴 P0 | Créer `daily_call_summaries` + job | Dashboards rapides | 2 jours | Faible |
 | 🔴 P1 | Archivage CDR > 12 mois | Taille table `calls` | 2 jours | Moyen |
 | 🟠 P1 | Refonte `invoices` (sortie du JSON blob) | Performance facturation | 5-7 jours | Élevé (migration données) |
+| 🟠 P1 | Partitionnement `invoice_lines` par année | Performance requêtes (4M+ rows sur 5 ans) | Inclus dans refonte invoices | Moyen (dénormalisation `invoice_date`) |
 | 🟡 P2 | Suppression tables `_bkp` (après validation équipe) | Propreté | 0.5 jour | Faible |
 | 🟡 P2 | Finaliser migration tarification (déjà en cours) | Maintenabilité | À confirmer | Faible (migration pilotée) |
 | 🟡 P2 | Enrichir `monthly_summaries` (client_id, financier) | Reporting | 1 jour | Faible |
