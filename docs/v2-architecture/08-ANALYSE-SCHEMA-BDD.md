@@ -592,10 +592,16 @@ CREATE TABLE `invoices_v2` (
 CREATE TABLE `invoice_lines` (
     `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
     `invoice_id` bigint UNSIGNED NOT NULL,
-    `line_id` bigint UNSIGNED DEFAULT NULL,
-    `service_id` bigint UNSIGNED DEFAULT NULL,
-    `device_id` bigint UNSIGNED DEFAULT NULL,
-    `type` enum('plan','service','device','option','out_of_plan','adjustment','discount') NOT NULL,
+
+    -- Relation polymorphique (remplace line_id, service_id, device_id)
+    -- Permet de lier une ligne de facture à N'IMPORTE QUEL modèle facturable
+    -- sans modifier le schéma quand on ajoute un nouveau type de produit.
+    -- En Laravel : morphTo() / morphMany()
+    `billable_type` varchar(255) DEFAULT NULL,  -- Ex: 'App\Models\Line', 'App\Models\Device', 'App\Models\ServiceSheet'
+    `billable_id` bigint UNSIGNED DEFAULT NULL,  -- ID de l'entité liée
+
+    -- Type de ligne (varchar extensible, pas d'enum figé)
+    `type` varchar(50) NOT NULL,  -- 'plan','service','device','option','out_of_plan','adjustment','discount','license','hosting'...
     `label` varchar(500) NOT NULL,
     `description` text DEFAULT NULL,
     `quantity` decimal(10,3) NOT NULL DEFAULT 1,
@@ -610,10 +616,19 @@ CREATE TABLE `invoice_lines` (
 
     PRIMARY KEY (`id`),
     KEY `idx_invoice` (`invoice_id`),
-    KEY `idx_line` (`line_id`),
-    FOREIGN KEY (`invoice_id`) REFERENCES `invoices_v2` (`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`line_id`) REFERENCES `lines` (`id`) ON DELETE SET NULL
+    KEY `idx_billable` (`billable_type`, `billable_id`),
+    FOREIGN KEY (`invoice_id`) REFERENCES `invoices_v2` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- Exemples d'utilisation Laravel :
+-- InvoiceLine::morphTo('billable') → Line, Device, ServiceSheet, ou tout futur modèle
+-- Line::morphMany(InvoiceLine::class, 'billable') → toutes les lignes de facture liées
+--
+-- Avantages par rapport à l'ancien design (line_id + service_id + device_id) :
+-- 1. Extensible : ajouter un nouveau produit facturable = créer un modèle PHP, zéro migration BDD
+-- 2. Propre : pas de colonnes NULL inutiles (avant, 2 colonnes sur 3 étaient toujours NULL)
+-- 3. Pattern Laravel natif : déjà utilisé dans le projet (addresses, media, tags via Spatie)
+-- 4. Le champ `type` en varchar (pas enum) permet d'ajouter des types sans migration
 ```
 
 #### Stratégie de migration — NE PAS modifier la table existante
@@ -658,6 +673,41 @@ Phase D — Bascule finale (quand V1 éteinte)
 - `invoices_v2` sans JSON : quelques Mo au lieu de Go
 - `invoice_lines` : requêtable, indexable, analysable
 - Les dashboards financiers deviennent instantanés
+
+#### Faut-il partitionner `invoices_v2` et `invoice_lines` ?
+
+**Estimation de volumétrie** :
+```
+invoices_v2 :
+  380 clients × 12 factures/an = 4 560 rows/an
+  Sur 5 ans = ~23 000 rows (en-têtes) → quelques Mo
+
+invoice_lines :
+  ~15 lignes/facture en moyenne × 4 560 = ~68 400 rows/an
+  Sur 5 ans = ~345 000 rows → quelques dizaines de Mo
+```
+
+**Verdict : NON, pas de partitionnement nécessaire** pour `invoices_v2` ni `invoice_lines`. Ces volumes sont triviaux pour MySQL avec de bons index. Le partitionnement ajouterait de la complexité (contraintes sur les PK, FK interdites) sans gain mesurable.
+
+Un simple index `(client_id, date)` sur `invoices_v2` et `(invoice_id)` + `(billable_type, billable_id)` sur `invoice_lines` suffit largement.
+
+**Le vrai candidat au partitionnement reste `calls`** (12 Go+, ~1M rows/mois) — traité en Phase 1.3.
+
+#### Comportement des index MySQL avec partitionnement (référence pour `calls`)
+
+| Aspect | Comportement |
+|--------|-------------|
+| **Index locaux** | Chaque partition possède son propre B-tree. Un `WHERE date = '2025-06-15'` ne scanne que la partition concernée (**partition pruning**) |
+| **UNIQUE KEY** | **Doit inclure la colonne de partition** dans la clé. Contrainte MySQL incontournable |
+| **Clés étrangères** | **Interdites** sur tables partitionnées MySQL. Les contraintes deviennent applicatives |
+| **INSERT** | Routage automatique vers la bonne partition — transparent pour l'application |
+| **SELECT avec colonne de partition** | Partition pruning automatique → ne scanne que la/les partitions concernées |
+| **SELECT sans colonne de partition** | Scanne **toutes** les partitions → pas de gain, potentiellement plus lent |
+| **COUNT(\*)** | Sans WHERE sur la colonne de partition → scanne tout. Avec WHERE → seulement la partition ciblée |
+| **DROP PARTITION** | Suppression instantanée d'une partition entière (vs DELETE row-by-row) — idéal pour l'archivage |
+| **Ajout de partition** | `ALTER TABLE ... ADD PARTITION` — opération rapide, à planifier (job CRON annuel ou automatique) |
+
+> **Règle d'or** : ne partitionner que les tables où la volumétrie le justifie ET où les requêtes filtrent systématiquement sur la colonne de partition. Pour `calls` (filtre quasi-systématique sur `date`), c'est pertinent. Pour `invoices` (~23K rows sur 5 ans), c'est inutile.
 
 ### Phase 2 bis — Finalisation de la migration tarification (en cours)
 
