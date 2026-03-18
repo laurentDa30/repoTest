@@ -676,38 +676,128 @@ Phase D — Bascule finale (quand V1 éteinte)
 
 #### Faut-il partitionner `invoices_v2` et `invoice_lines` ?
 
-**Estimation de volumétrie** :
+**Estimation de volumétrie (réaliste)** :
 ```
-invoices_v2 :
+invoices_v2 (en-têtes) :
   380 clients × 12 factures/an = 4 560 rows/an
-  Sur 5 ans = ~23 000 rows (en-têtes) → quelques Mo
+  Sur 5 ans = ~23 000 rows → quelques Mo → PAS de partitionnement nécessaire
 
-invoice_lines :
-  ~15 lignes/facture en moyenne × 4 560 = ~68 400 rows/an
-  Sur 5 ans = ~345 000 rows → quelques dizaines de Mo
+invoice_lines (lignes détaillées) :
+  ⚠️ Le nombre de lignes par facture varie fortement selon le client :
+  - Clients légers (~300) : ~20 lignes/facture (quelques forfaits + matériel)
+  - Clients lourds (~80)  : ~800 lignes/facture (500 forfaits + 300 matériels + services)
+  - Cas extrêmes : certains clients dépassent 1 000 lignes/facture
+
+  Clients légers : 300 × 12 × 20    =   72 000 rows/an
+  Clients lourds :  80 × 12 × 800   =  768 000 rows/an
+                                Total ≈  840 000 rows/an
+
+  Taille par row ≈ 500 octets (label ~100, description ~200, 6 decimals, index overhead)
+
+  Sur 3 ans  = ~2.5M rows ≈ 1.3 Go
+  Sur 5 ans  = ~4.2M rows ≈ 2.1 Go
+  Sur 10 ans = ~8.4M rows ≈ 4.2 Go (+ croissance clientèle)
 ```
 
-**Verdict : NON, pas de partitionnement nécessaire** pour `invoices_v2` ni `invoice_lines`. Ces volumes sont triviaux pour MySQL avec de bons index. Le partitionnement ajouterait de la complexité (contraintes sur les PK, FK interdites) sans gain mesurable.
+**Verdict** :
+- `invoices_v2` (en-têtes) : **PAS de partitionnement** — 23K rows sur 5 ans, trivial.
+- `invoice_lines` : **OUI, partitionnement recommandé à partir de la Phase 2** — 4M+ rows sur 5 ans avec des factures pouvant contenir 500-1000+ lignes justifie un partitionnement par année.
 
-Un simple index `(client_id, date)` sur `invoices_v2` et `(invoice_id)` + `(billable_type, billable_id)` sur `invoice_lines` suffit largement.
+#### Stratégie de partitionnement pour `invoice_lines`
 
-**Le vrai candidat au partitionnement reste `calls`** (12 Go+, ~1M rows/mois) — traité en Phase 1.3.
+**Pourquoi par année (et pas par mois)** :
+- Les factures sont mensuelles mais les requêtes portent souvent sur une **année fiscale**
+- 12 partitions par an serait excessif pour le volume (~840K rows/an = ~70K/mois)
+- Le partitionnement annuel donne un bon compromis pruning/complexité
 
-#### Comportement des index MySQL avec partitionnement (référence pour `calls`)
+**Implémentation** :
+
+```sql
+-- invoice_lines n'a PAS de FK sortante (grâce au design polymorphique),
+-- seule la FK vers invoices_v2 est concernée.
+-- ⚠️ MySQL interdit les FK sur tables partitionnées → contrainte applicative.
+-- La FK invoice_id → invoices_v2 sera assurée par le code Laravel (relation belongsTo).
+
+CREATE TABLE `invoice_lines` (
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `invoice_id` bigint UNSIGNED NOT NULL,
+    `invoice_date` date NOT NULL,  -- Dénormalisé depuis invoices_v2.date pour le partitionnement
+
+    -- Polymorphique
+    `billable_type` varchar(255) DEFAULT NULL,
+    `billable_id` bigint UNSIGNED DEFAULT NULL,
+
+    `type` varchar(50) NOT NULL,
+    `label` varchar(500) NOT NULL,
+    `description` text DEFAULT NULL,
+    `quantity` decimal(10,3) NOT NULL DEFAULT 1,
+    `unit_price_ht` decimal(10,4) NOT NULL DEFAULT 0,
+    `amount_ht` decimal(10,2) NOT NULL DEFAULT 0,
+    `tva_rate` decimal(5,2) NOT NULL DEFAULT 20.00,
+    `amount_tva` decimal(10,2) NOT NULL DEFAULT 0,
+    `amount_ttc` decimal(10,2) NOT NULL DEFAULT 0,
+    `sort_order` int NOT NULL DEFAULT 0,
+    `created_at` timestamp NULL DEFAULT NULL,
+    `updated_at` timestamp NULL DEFAULT NULL,
+
+    -- ⚠️ La colonne de partition (invoice_date) DOIT être dans la PK et les UNIQUE KEY
+    PRIMARY KEY (`id`, `invoice_date`),
+    KEY `idx_invoice` (`invoice_id`),
+    KEY `idx_billable` (`billable_type`, `billable_id`),
+    KEY `idx_type_date` (`type`, `invoice_date`),
+    KEY `idx_invoice_date` (`invoice_id`, `invoice_date`)
+) ENGINE=InnoDB
+PARTITION BY RANGE (YEAR(invoice_date)) (
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p2026 VALUES LESS THAN (2027),
+    PARTITION p2027 VALUES LESS THAN (2028),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Job CRON annuel (ou Artisan command) pour ajouter une partition :
+-- ALTER TABLE invoice_lines REORGANIZE PARTITION p_future INTO (
+--     PARTITION p2028 VALUES LESS THAN (2029),
+--     PARTITION p_future VALUES LESS THAN MAXVALUE
+-- );
+```
+
+**Note sur `invoice_date`** :
+- C'est une **dénormalisation volontaire** de `invoices_v2.date`
+- Sans cette colonne, impossible de partitionner `invoice_lines` (MySQL exige que la colonne de partition soit dans la table)
+- Le coût est minime (4 octets/row) et elle est remplie automatiquement à l'insertion
+- En Laravel, un `creating` event ou un `Mutator` sur le modèle `InvoiceLine` copie la date depuis la facture parente
+
+```php
+// InvoiceLine.php — remplissage automatique de invoice_date
+protected static function booted(): void
+{
+    static::creating(function (InvoiceLine $line) {
+        $line->invoice_date ??= $line->invoice->date;
+    });
+}
+```
+
+#### Comportement des index MySQL avec partitionnement (référence `calls` et `invoice_lines`)
 
 | Aspect | Comportement |
 |--------|-------------|
-| **Index locaux** | Chaque partition possède son propre B-tree. Un `WHERE date = '2025-06-15'` ne scanne que la partition concernée (**partition pruning**) |
-| **UNIQUE KEY** | **Doit inclure la colonne de partition** dans la clé. Contrainte MySQL incontournable |
-| **Clés étrangères** | **Interdites** sur tables partitionnées MySQL. Les contraintes deviennent applicatives |
+| **Index locaux** | Chaque partition possède son propre B-tree. Un `WHERE invoice_date = '2025-06-15'` ne scanne que la partition `p2025` (**partition pruning**) |
+| **UNIQUE KEY** | **Doit inclure la colonne de partition** dans la clé. C'est pourquoi la PK est `(id, invoice_date)` et non `(id)` seul |
+| **Clés étrangères** | **Interdites** sur tables partitionnées MySQL. La relation `invoice_id → invoices_v2` est assurée par Laravel (`belongsTo`) |
 | **INSERT** | Routage automatique vers la bonne partition — transparent pour l'application |
 | **SELECT avec colonne de partition** | Partition pruning automatique → ne scanne que la/les partitions concernées |
-| **SELECT sans colonne de partition** | Scanne **toutes** les partitions → pas de gain, potentiellement plus lent |
-| **COUNT(\*)** | Sans WHERE sur la colonne de partition → scanne tout. Avec WHERE → seulement la partition ciblée |
-| **DROP PARTITION** | Suppression instantanée d'une partition entière (vs DELETE row-by-row) — idéal pour l'archivage |
-| **Ajout de partition** | `ALTER TABLE ... ADD PARTITION` — opération rapide, à planifier (job CRON annuel ou automatique) |
+| **SELECT sans colonne de partition** | Scanne **toutes** les partitions → pas de gain, potentiellement plus lent qu'une table non partitionnée |
+| **COUNT(\*)** | Sans WHERE date → scanne tout. Avec WHERE date → seulement la partition ciblée |
+| **DROP PARTITION** | Suppression instantanée d'une partition entière (vs DELETE row-by-row) — idéal pour l'archivage fiscal après durée légale |
+| **REORGANIZE PARTITION** | Permet de découper `p_future` en année réelle + nouveau `p_future` — opération rapide |
+| **Taille des index** | Plus petits par partition → tiennent mieux en mémoire (buffer pool InnoDB) |
+| **EXPLAIN PARTITIONS** | Permet de vérifier que le pruning fonctionne : `EXPLAIN SELECT ... WHERE invoice_date BETWEEN ...` affiche les partitions scannées |
 
-> **Règle d'or** : ne partitionner que les tables où la volumétrie le justifie ET où les requêtes filtrent systématiquement sur la colonne de partition. Pour `calls` (filtre quasi-systématique sur `date`), c'est pertinent. Pour `invoices` (~23K rows sur 5 ans), c'est inutile.
+> **Règle d'or** : ne partitionner que les tables où la volumétrie le justifie ET où les requêtes filtrent systématiquement sur la colonne de partition.
+> - `calls` (12 Go+, filtre quasi-systématique sur `date`) → **OUI**
+> - `invoice_lines` (2-4 Go sur 5 ans, lignes massives par client) → **OUI, par année**
+> - `invoices_v2` (~23K rows sur 5 ans) → **NON**
 
 ### Phase 2 bis — Finalisation de la migration tarification (en cours)
 
