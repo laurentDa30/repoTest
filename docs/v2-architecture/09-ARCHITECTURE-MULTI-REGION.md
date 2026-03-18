@@ -833,7 +833,216 @@ php artisan tenant:create paca "PACA" paca.cekoya.fr admin@paca.cekoya.fr
 
 ---
 
-## 12. Risques et mitigations
+## 12. Transfert de client entre tenants (régions)
+
+### Le besoin
+
+Un client géré par la région IDF peut être transféré vers la région PACA (réorganisation commerciale, rachat de portefeuille, etc.). Avec l'architecture database-per-tenant, ce n'est **pas un simple `UPDATE`** — c'est une **migration de données entre deux BDD**.
+
+### Ce qui doit être transféré
+
+```
+🔴 CRITIQUE (le client ne fonctionne pas sans) :
+├── clients (1 row + addresses, referents, groups, sub_groups)
+├── collaborators + client_collaborator (N rows)
+├── lines + sims + line_plan + portabilities (N rows)
+├── devices + device_client + device_collaborator + device_group + device_line
+├── client_user → users portail client (accès au portail)
+├── client_preferences, client_plan_preferences, client_device_sheet
+└── alerts
+
+🟠 IMPORTANT (historique facturation et consommations) :
+├── invoices_v2 + invoice_lines (peut être massif : 800+ lignes/facture × 12 mois × N années)
+├── invoice_cdrs (MEDIUMBLOB compressé)
+├── calls_mobile (⚠️ TRÈS volumineux : 100K-500K+ rows pour un client lourd)
+├── daily_call_summaries + monthly_summaries
+├── carbon_summaries + carbon_reports
+└── devis
+
+🟡 SECONDAIRE (support, commandes) :
+├── tickets + tickets_messages + ticket_todos
+├── orders + order_receives + client_orders + carts
+├── partner_client (liens ambassadeur)
+├── posts / post_sends (campagnes ciblées)
+├── media (polymorphique → fichiers physiques à copier !)
+├── events, errors (polymorphique)
+└── transactions
+```
+
+### Le problème des IDs auto-increment
+
+C'est le **principal obstacle technique**. Toutes les tables utilisent `bigint AUTO_INCREMENT`.
+
+```
+Exemple de conflit :
+
+BDD IDF :                            BDD PACA :
+  clients.id = 42 (Acme Corp)         clients.id = 42 (Autre société)
+  lines.id = 100 (ligne d'Acme)       lines.id = 100 (ligne d'Autre)
+  lines.client_id = 42                lines.client_id = 42
+
+→ Impossible d'insérer le client IDF id=42 dans PACA : l'id existe déjà !
+→ Si on attribue un nouvel id (ex: 501), il faut mettre à jour TOUTES les FK :
+   lines.client_id, invoices_v2.client_id, tickets.client_id, etc.
+→ Pire : les relations polymorphiques (addresses, media, events) stockent l'id
+   dans morphable_id → cascade de mises à jour.
+```
+
+**Le catalogue partagé (plans, device_sheets, etc.) n'est PAS impacté** : les IDs sont synchronisés depuis le central, identiques dans toutes les régions.
+
+### Stratégie recommandée : UUIDs sur les tables métier
+
+**La solution la plus robuste pour permettre le transfert** est d'utiliser des UUIDs sur les tables qui portent des données client. Cela élimine les conflits d'IDs entre régions.
+
+```
+Tables à migrer vers UUID (V2) :
+
+📁 Priorité haute (entités principales)
+├── clients.uuid          — EXISTE DÉJÀ ✅ (colonne uuid présente en V1)
+├── collaborators.uuid    — EXISTE DÉJÀ ✅
+├── lines                 — À ajouter
+├── sims                  — À ajouter
+├── devices               — À ajouter
+├── invoices_v2           — À ajouter (nouvelle table, on choisit dès le départ)
+├── tickets               — À ajouter
+└── orders                — À ajouter
+
+📁 Priorité basse (tables filles, suivent la PK parente)
+├── invoice_lines         — FK vers invoices_v2 (qui aura un UUID)
+├── calls_mobile          — FK vers lines (qui aura un UUID)
+├── daily_call_summaries  — FK vers lines + clients
+└── etc.
+```
+
+**Approche hybride recommandée** : Garder `bigint AUTO_INCREMENT` comme PK (performance des JOINs) mais ajouter une colonne `uuid` comme **identifiant métier** unique globalement.
+
+```sql
+-- Pattern pour les tables transférables :
+ALTER TABLE lines
+    ADD COLUMN `uuid` char(36) NOT NULL AFTER `id`,
+    ADD UNIQUE KEY `lines_uuid_unique` (`uuid`);
+
+-- Remplissage des existants :
+UPDATE lines SET uuid = UUID() WHERE uuid = '';
+```
+
+```php
+// Trait Laravel pour les modèles transférables
+trait HasUuid
+{
+    protected static function bootHasUuid(): void
+    {
+        static::creating(function ($model) {
+            $model->uuid ??= (string) Str::uuid();
+        });
+    }
+
+    // Route model binding par UUID (au lieu de l'id)
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
+    }
+}
+```
+
+### Processus de transfert (Artisan command)
+
+```php
+// php artisan tenant:transfer-client {client_uuid} {source_tenant} {target_tenant}
+
+class TransferClientBetweenTenants extends Command
+{
+    protected $signature = 'tenant:transfer-client
+        {client_uuid : UUID du client à transférer}
+        {source : Tenant source (ex: idf)}
+        {target : Tenant cible (ex: paca)}
+        {--dry-run : Simuler sans exécuter}
+        {--skip-cdr : Ne pas transférer les CDR historiques (volume massif)}
+        {--since= : Date minimale pour les données historiques (CDR, summaries)}';
+}
+```
+
+**Étapes du transfert** :
+
+```
+Phase 1 — Pré-transfert (vérifications)
+   1. Vérifier que le client existe dans le tenant source
+   2. Vérifier que l'UUID n'existe PAS dans le tenant cible
+   3. Estimer le volume (nombre de rows par table, taille CDR)
+   4. Demander confirmation à l'opérateur (ou --force)
+
+Phase 2 — Gel du client (éviter les écritures pendant le transfert)
+   5. Mettre le client en status "transferring" (bloquer les écritures)
+   6. Notifier les utilisateurs portail connectés
+
+Phase 3 — Copie des données (dans l'ordre des dépendances)
+   7. Copier clients + tables liées directement (addresses, referents, etc.)
+   8. Copier collaborators + client_collaborator
+   9. Copier lines + sims + line_plan + devices + pivots
+   10. Copier invoices_v2 + invoice_lines
+   11. Copier tickets + orders
+   12. Copier CDR (optionnel, filtrable par date via --since)
+       → Par batch de 10 000 rows pour les tables volumineuses
+   13. Copier summaries (daily + monthly)
+   14. Copier media (rows + fichiers physiques sur le filesystem)
+   15. Copier users portail + client_user
+
+Phase 4 — Vérification
+   16. Comparer les counts par table entre source et cible
+   17. Vérifier checksums sur les montants (sum invoices, sum CDR)
+   18. Vérifier intégrité des FK dans la cible
+
+Phase 5 — Bascule
+   19. Supprimer les données du tenant source (soft-delete ou hard-delete)
+   20. Activer le client dans le tenant cible (status = active)
+   21. Mettre à jour regional_summaries des deux régions
+   22. Logger l'opération dans un audit trail central
+
+Phase 6 — Post-transfert
+   23. Notifier les admins des deux régions
+   24. Conserver un log de mapping (ancien tenant → nouveau) pendant 6 mois
+```
+
+### Tableau des volumes estimés pour un client lourd
+
+| Table | Rows estimées | Taille | Temps estimé |
+|-------|--------------|--------|-------------|
+| clients + pivots | ~50 | < 1 Mo | < 1s |
+| collaborators | ~200 | < 1 Mo | < 1s |
+| lines + sims | ~500 | < 5 Mo | < 1s |
+| invoices_v2 + invoice_lines | ~10K lignes/an × N ans | 10-50 Mo | 5-30s |
+| calls_mobile (CDR) | 100K-500K rows | 50-200 Mo | 1-10 min |
+| invoice_cdrs (BLOB) | ~60 (5 ans × 12) | 10-100 Mo | 5-30s |
+| tickets + messages | ~200 | < 5 Mo | < 1s |
+| devices + pivots | ~500 | < 5 Mo | < 1s |
+| summaries (daily+monthly) | ~50K | < 10 Mo | < 5s |
+| media (DB + fichiers) | Variable | Variable | Variable |
+| **Total client lourd** | **~600K rows** | **~200-400 Mo** | **~5-15 min** |
+
+### Cas spécial : transfert sans historique CDR
+
+Pour les clients très lourds en CDR, le flag `--skip-cdr` permet de :
+- Transférer le client actif (lignes, forfaits, devices, collaborateurs)
+- Transférer les factures (pour la comptabilité)
+- **Ne pas transférer** les CDR bruts (`calls_mobile`)
+- Les CDR restent consultables dans l'ancienne région (en lecture seule) pendant une période définie
+- Les nouveaux CDR (post-transfert) arrivent directement dans la nouvelle région
+
+### Recommandations
+
+| Recommandation | Priorité | Quand |
+|---------------|----------|-------|
+| Ajouter `uuid` sur les tables métier principales | **P1** | Phase 1 V2 (dès la refonte) |
+| Utiliser `uuid` comme route model binding (URLs) | **P1** | Phase 1 V2 |
+| Développer la commande `tenant:transfer-client` | **P2** | Phase 3 (quand la 2ème région existe) |
+| Relations polymorphiques : utiliser `uuid` dans `morphable_id` | **P2** | Si faisable (changement important) |
+| CDR : ajouter `client_uuid` en plus de `client_id` | **P3** | Pour faciliter les requêtes cross-tenant |
+
+> **Note** : Le transfert de client est une opération **rare** (réorganisation commerciale, pas quotidienne). L'investissement dans les UUIDs se justifie aussi pour d'autres raisons : URLs non-prédictibles (sécurité), API publiques stables, interopérabilité.
+
+---
+
+## 13. Risques et mitigations
 
 | Risque | Impact | Mitigation |
 |--------|--------|------------|
@@ -843,3 +1052,4 @@ php artisan tenant:create paca "PACA" paca.cekoya.fr admin@paca.cekoya.fr
 | Reporting cross-régions lent | Dashboard global laggy | Tables d'agrégation `regional_summaries` pré-calculées |
 | Migrations de schéma désynchronisées | Erreurs SQL | Versioning strict des migrations + CI qui teste sur toutes les BDD |
 | Complexité excessive pour 2 devs | Ralentissement développement | stancl/tenancy automatise 80% du travail. Le code métier ne change quasiment pas |
+| Transfert de client entre régions impossible | Blocage commercial | UUIDs sur tables métier dès la Phase 1 + commande `tenant:transfer-client` en Phase 3 (voir section 12) |
