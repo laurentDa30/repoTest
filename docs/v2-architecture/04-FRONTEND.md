@@ -198,7 +198,53 @@ Echo.private('admin.imports')
 
 **Gain** : suppression du coût Pusher + latence réduite (self-hosted).
 
-## 5. Performance Frontend
+## 5. Décision : Zéro npm / Zéro build pipeline JS
+
+### Contexte
+
+Un fichier `webpack.mix.js` (Laravel Mix) existe en V1. Laravel Mix est obsolète depuis Laravel 9.19+ (remplacé par Vite). En V2, **aucun build pipeline JS n'est nécessaire**.
+
+### Pourquoi
+
+- **Livewire 4 bundle Alpine.js automatiquement** : Alpine est injecté via `@livewireScripts`, pas besoin d'installation séparée
+- **Livewire 4 bundle Morph DOM** : manipulation DOM optimisée incluse
+- **`wire:navigate`** fournit la navigation SPA-like nativement
+- **Tailwind CSS** peut être utilisé via CDN (dev) ou via le CLI standalone (prod) — aucun npm requis
+
+### Layout type V2 (zéro npm)
+
+```html
+<!-- resources/views/layouts/app.blade.php -->
+<head>
+    {{-- Tailwind via CDN (dev) ou CLI standalone (prod) --}}
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    @livewireStyles
+</head>
+<body>
+    {{ $slot }}
+
+    @livewireScripts
+    {{-- Alpine.js est déjà injecté par Livewire, rien à ajouter --}}
+</body>
+```
+
+### Actions de nettoyage V1
+
+| Élément V1 | Action V2 |
+|------------|-----------|
+| `webpack.mix.js` | **Supprimer** |
+| `package.json` / `node_modules` | **Supprimer** (si aucune autre dépendance npm nécessaire) |
+| `resources/sass/app.scss` | **Remplacer** par Tailwind (CDN dev / CLI standalone prod) |
+| `resources/js/app.js` | **Vérifier le contenu** — si c'est juste du bootstrap Laravel, supprimer |
+
+### Seul cas où npm serait réintroduit
+
+Si des composants JS complexes sans CDN sont nécessaires (éditeur rich-text custom, lib de charting sans CDN). Même là, privilégier les CDN ou les packages Livewire dédiés (FilamentPHP, etc.).
+
+---
+
+## 6. Performance Frontend
 
 ### Métriques cibles
 
@@ -227,7 +273,7 @@ Echo.private('admin.imports')
 <livewire:client.consumption-chart :client="$client" lazy />
 ```
 
-## 6. Migration Bootstrap → Tailwind
+## 7. Migration Bootstrap → Tailwind
 
 ### Stratégie progressive
 1. **Phase 0** : Installer Tailwind en parallèle de Bootstrap (coexistence)
@@ -237,7 +283,7 @@ Echo.private('admin.imports')
 
 **Point critique** : ne PAS essayer de tout migrer d'un coup. La coexistence Tailwind + Bootstrap est possible et recommandée.
 
-## 7. Risques identifiés
+## 8. Risques identifiés
 
 | Risque | Mitigation |
 |--------|------------|

@@ -212,7 +212,38 @@ class ImportTransatelCDRJob implements ShouldQueue, ShouldBeUnique
 - Idempotence : pas de doublons si re-run
 - Notification en cas d'erreur : les erreurs CDR remontent dans l'UI existante
 
-### E. Queue & Jobs — Laravel Horizon
+### E. Remplacement des Observers par Middleware + Trait
+
+#### Constat V1
+
+Les Observers en V1 servent uniquement au logging d'audit. Ils présentent plusieurs problèmes :
+- `request()->all()` dans un Observer = couplage couche Domain ↔ couche HTTP (crash hors contexte HTTP)
+- Logge les données d'entrée (`request()->all()`), pas les changements réels (`getChanges()`)
+- Un Observer par modèle = duplication massive du même pattern
+
+#### Solution V2 : deux mécanismes complémentaires
+
+| Mécanisme | Scope | Données capturées | Fonctionne hors HTTP |
+|-----------|-------|-------------------|---------------------|
+| **Middleware `AuditLog`** | Actions utilisateur (connexion, navigation, CRUD) | Request complète (IP, user agent, session, route, payload sanitisé) | Non (c'est voulu) |
+| **Trait `Auditable`** | Mutations modèle (created, updated, deleted) | `$model->getChanges()` — les vrais changements | Oui (Jobs, Artisan, Seeders) |
+
+Le middleware est appliqué sur les groupes de routes admin. Le trait est ajouté sur les modèles sensibles (`use Auditable;`).
+
+Voir `06-CYBERSECURITE.md` section D pour l'implémentation détaillée et le schéma de la table `audit_entries`.
+
+#### Migration V1 → V2
+
+1. Créer le middleware `AuditLog` et le trait `Auditable`
+2. Créer la migration `audit_entries`
+3. Ajouter `use Auditable;` sur les modèles concernés (Device, Client, Line, Invoice, etc.)
+4. Ajouter `'audit-log'` au middleware group des routes admin
+5. Supprimer tous les Observers de logging (DeviceObserver, etc.)
+6. Supprimer les enregistrements d'Observers dans les ServiceProviders
+
+---
+
+### F. Queue & Jobs — Laravel Horizon
 
 ```php
 // config/horizon.php
@@ -251,7 +282,7 @@ class ImportTransatelCDRJob implements ShouldQueue, ShouldBeUnique
 - `billing` + `invoices` : facturation (critique, ne doit pas être bloquée par les imports)
 - `tenant-sync` + `tenant-provision` : synchronisation catalogue central → régions, provisioning nouvelles régions
 
-### F. Cache stratégique avec Redis
+### G. Cache stratégique avec Redis
 
 ```php
 // Exemples de caching pertinent

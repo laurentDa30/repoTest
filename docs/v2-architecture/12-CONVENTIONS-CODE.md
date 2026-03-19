@@ -90,6 +90,17 @@ app/Modules/{ModuleName}/
 └── routes.php                 # Routes du module
 ```
 
+### Placement des éléments transversaux dans les modules
+
+| Élément | Couche | Emplacement | Justification |
+|---------|--------|-------------|---------------|
+| **Policies** | Infrastructure | `Infrastructure/Policies/` | Mécanisme d'autorisation lié au framework (Gates Laravel) |
+| **Notifications** | Infrastructure | `Infrastructure/Notifications/` | Canaux de sortie (mail, SMS, Slack) = infrastructure |
+| **Traits métier** | Domain | `Domain/Traits/` | Ex: `HasSubscription`, logique métier réutilisable entre modèles |
+| **Traits techniques** | Partagé | `app/Support/Traits/` | Ex: `Auditable`, `Filterable` — transversaux, pas spécifiques à un module |
+
+**Note sur les Observers** : les Observers Eloquent sont **déconseillés** en V2. Privilégier les Events/Listeners explicites (déjà présents dans `Domain/Events/` et `Application/Listeners/`). Voir section dédiée dans `03-BACKEND.md`.
+
 ### Règles d'isolation
 
 1. **Un module ne doit JAMAIS** importer les modèles internes d'un autre module
@@ -310,7 +321,58 @@ tests/
 
 ---
 
-## 7. Sécurité dans le code
+## 7. Audit & Logging
+
+### Stratégie d'audit à deux niveaux
+
+L'audit en V2 repose sur **deux mécanismes complémentaires**, pas sur des Observers Eloquent.
+
+#### Niveau 1 — Middleware HTTP `AuditLog` (actions utilisateur)
+
+Logge **qui fait quoi, quand, d'où** : connexions, navigation, actions CRUD.
+
+- Appliqué sur les groupes de routes admin (pas globalement)
+- Ne pas loguer les requêtes Livewire polling, debugbar, ou AJAX GET silencieux
+- Sanitiser les données sensibles (passwords, tokens)
+- Tronquer les payloads volumineux (> 500 chars)
+
+```php
+// Placement : app/Http/Middleware/AuditLog.php
+// Application : dans le groupe de routes admin
+Route::group([
+    'middleware' => ['auth', 'team.access', 'audit-log'],
+    // ...
+], function () { /* ... */ });
+```
+
+#### Niveau 2 — Trait `Auditable` (mutations modèle)
+
+Logge **les changements réels sur les données** via `$model->getChanges()`.
+
+- Appliqué sur les modèles sensibles uniquement (Client, Line, Invoice, Device...)
+- Fonctionne hors contexte HTTP (Jobs, commandes Artisan)
+
+```php
+// Placement : app/Support/Traits/Auditable.php
+// Usage :
+class Device extends Model
+{
+    use Auditable;
+}
+```
+
+#### Ce qui est interdit en V2
+
+- **Pas d'Observers pour le logging** : couplage implicite, effets de bord silencieux, `request()` inaccessible hors HTTP
+- **Pas de `request()->all()` dans la couche modèle** : violation de l'isolation des couches
+
+#### Purge des logs d'audit
+
+Table `audit_entries` purgée automatiquement après 3 mois via `Prunable`.
+
+---
+
+## 8. Sécurité dans le code
 
 - **Jamais** de `$request->all()` → toujours `$request->validated()`
 - **Jamais** de `Model::create($request->all())` → DTOs explicites
