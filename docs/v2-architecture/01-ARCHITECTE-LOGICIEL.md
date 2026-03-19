@@ -53,33 +53,73 @@ Chaque module adopte une organisation en 3 couches :
 - **Application/** : Actions/Services applicatifs (cas d'usage), DTOs
 - **Infrastructure/** : Eloquent repositories, mail, queue, API clients
 
+#### Organisation des portails dans chaque module
+
+Un module qui expose des fonctionnalités sur plusieurs portails (Hub, Tenant, Client, Ambassadeur) organise ses controllers, requests, resources et composants Livewire **par portail** dans le sous-dossier `Infrastructure/Http/`. Les routes sont également séparées par portail dans `routes/`.
+
+**Principe** : le Domain et l'Application sont **agnostiques du portail** — seule la couche Http sait quel portail elle sert. Un `IotSimService` ou une `CreateQuotaAlertAction` est appelé indifféremment par un controller Tenant ou Client.
+
 ```
 app/
 ├── Modules/
-│   ├── Prospect/           # Gestion prospects, devis prospect
-│   │   ├── Domain/
-│   │   │   ├── Models/           # Entités avec logique métier
-│   │   │   ├── ValueObjects/     # Ex: ProspectStatus, ContactInfo
-│   │   │   ├── Events/           # ProspectConverted, DevisAccepted
-│   │   │   └── Contracts/        # Interfaces exposées aux autres modules
-│   │   ├── Application/
-│   │   │   ├── Actions/          # ConvertProspectToClientAction
-│   │   │   ├── Services/         # ProspectService (orchestration)
-│   │   │   ├── DTOs/             # CreateProspectDTO, ProspectListDTO
-│   │   │   └── Listeners/        # Réactions aux events d'autres modules
+│   ├── IoT/                      # Exemple complet d'un module multi-portail
+│   │   ├── Domain/               # Métier pur — agnostique du portail
+│   │   │   ├── Models/
+│   │   │   ├── ValueObjects/
+│   │   │   ├── Events/
+│   │   │   └── Contracts/
+│   │   ├── Application/          # Cas d'usage — agnostique du portail
+│   │   │   ├── Actions/
+│   │   │   ├── Services/
+│   │   │   ├── DTOs/
+│   │   │   └── Listeners/
 │   │   ├── Infrastructure/
-│   │   │   ├── Repositories/     # EloquentProspectRepository
+│   │   │   ├── Repositories/
 │   │   │   ├── Http/
-│   │   │   │   ├── Controllers/
-│   │   │   │   ├── Resources/    # API Resources
-│   │   │   │   └── Requests/     # Form Requests (validation)
-│   │   │   ├── Jobs/             # Queue jobs
-│   │   │   └── Providers/        # ServiceProvider du module (bindings)
-│   │   └── routes.php
+│   │   │   │   ├── Tenant/              # Admin régional — gestion complète
+│   │   │   │   │   ├── Controllers/     #   SimController, QuotaController...
+│   │   │   │   │   ├── Requests/        #   CreateSimRequest, UpdateQuotaRequest...
+│   │   │   │   │   ├── Resources/       #   SimResource, QuotaResource...
+│   │   │   │   │   └── Livewire/        #   SimTable, QuotaDashboard...
+│   │   │   │   └── Client/              # Portail client — vue limitée
+│   │   │   │       ├── Controllers/     #   ClientIoTDashboardController...
+│   │   │   │       ├── Requests/        #   (peu de requests, vues read-only)
+│   │   │   │       ├── Resources/       #   ClientSimResource (champs restreints)
+│   │   │   │       └── Livewire/        #   ClientIoTOverview...
+│   │   │   ├── Jobs/
+│   │   │   └── Providers/        # IoTServiceProvider (bindings + chargement routes)
+│   │   ├── routes/
+│   │   │   ├── tenant.php        # Routes admin IoT (prefix: iot/, name: tenant.iot.*)
+│   │   │   └── client.php        # Routes client IoT (prefix: iot/, name: client.iot.*)
+│   │   └── resources/views/
+│   │       ├── tenant/           # Vues admin
+│   │       └── client/           # Vues client
+│   │
+│   ├── Prospect/                 # Module mono-portail (tenant uniquement)
+│   │   ├── Domain/
+│   │   │   ├── Models/
+│   │   │   ├── ValueObjects/
+│   │   │   ├── Events/
+│   │   │   └── Contracts/
+│   │   ├── Application/
+│   │   │   ├── Actions/
+│   │   │   ├── Services/
+│   │   │   ├── DTOs/
+│   │   │   └── Listeners/
+│   │   ├── Infrastructure/
+│   │   │   ├── Repositories/
+│   │   │   ├── Http/
+│   │   │   │   └── Tenant/              # Tenant uniquement — pas de sous-dossier Client/
+│   │   │   │       ├── Controllers/
+│   │   │   │       ├── Resources/
+│   │   │   │       └── Requests/
+│   │   │   ├── Jobs/
+│   │   │   └── Providers/
+│   │   └── routes/
+│   │       └── tenant.php
 │   │
 │   ├── Client/             # Clients, agences, référents, préférences, collaborateurs (entité pivot)
 │   ├── Telecom/            # Lignes mobile/fixe/internet, SIMs, portabilités
-│   ├── IoT/                # SIMs IoT, quotas spécifiques, CDR IoT séparés
 │   ├── UCaaS/              # Wazo : communications unifiées, VoIP, collaboration
 │   ├── Infogerance/        # Parc informatique, GLPI (s'appuie sur les collaborateurs du module Client)
 │   ├── Catalog/            # Matériels, services, forfaits, fournisseurs
@@ -89,13 +129,13 @@ app/
 │   ├── CDR/                # Consommations — stockage et agrégation (partitionné par type : mobile, IoT, UCaaS)
 │   ├── Stock/              # Gestion stock, SIMs physiques, appareils
 │   ├── Integration/        # Connecteurs fournisseurs (Transatel, Unyc, Wazo, IELO, euroFIBER)
-│   ├── Ambassador/         # Programme ambassadeur, paiements
+│   ├── Ambassador/         # Programme ambassadeur, paiements (portails : tenant + ambassador)
 │   ├── Environment/        # Module RSE, émissions, captation
 │   ├── Content/            # Rapports, nouveautés, mailing, templates
 │   ├── Auth/               # Authentification, rôles, permissions
 │   ├── Finance/            # Dashboard finance, analyse, exports
 │   ├── IA/                 # Intelligence artificielle (anomalies CDR, scoring, optimisation forfaits, assistant)
-│   └── Central/            # Hub multi-région (catalogue, sync, dashboard global)
+│   └── Central/            # Hub multi-région — exclusivement hub central (catalogue, sync, dashboard global)
 │
 ├── Shared/                 # Code partagé entre modules
 │   ├── Traits/
@@ -105,7 +145,149 @@ app/
 │   └── DTOs/
 ```
 
-> **Note multi-région** : Les modules ci-dessus s'exécutent dans chaque instance régionale. Le module `Central/` ne tourne que sur le Hub et gère la synchronisation catalogue, le registry des régions et le SSO.
+#### Matrice portails × modules
+
+Chaque module n'expose des routes que sur les portails où il a des fonctionnalités. Le ServiceProvider de chaque module ne charge que les fichiers de routes pertinents selon le contexte d'exécution.
+
+| Module | Hub Central | Tenant (admin) | Client | Ambassadeur |
+|--------|:-----------:|:--------------:|:------:|:-----------:|
+| **Central** | ✅ (exclusif) | — | — | — |
+| **Client** | — | ✅ | ✅ | — |
+| **Telecom** | — | ✅ | ✅ | — |
+| **IoT** | — | ✅ | ✅ | — |
+| **UCaaS** | — | ✅ | ✅ | — |
+| **Infogerance** | — | ✅ | ✅ | — |
+| **Billing** | — | ✅ | ✅ | — |
+| **CDR** | — | ✅ | ✅ | — |
+| **Stock** | — | ✅ | — | — |
+| **Catalog** | ✅ (sync) | ✅ | — | — |
+| **Ticket** | — | ✅ | ✅ | — |
+| **Order** | — | ✅ | ✅ | — |
+| **Prospect** | — | ✅ | — | — |
+| **Ambassador** | — | ✅ | — | ✅ |
+| **Environment** | — | ✅ | ✅ | — |
+| **Finance** | ✅ (global) | ✅ | — | — |
+| **Content** | — | ✅ | ✅ | ✅ |
+| **Auth** | ✅ | ✅ | ✅ | ✅ |
+| **IA** | — | ✅ | ✅ | — |
+| **Integration** | — | ✅ (interne) | — | — |
+
+#### Chargement conditionnel des routes par portail
+
+Chaque module charge ses routes **uniquement** dans le bon contexte via son ServiceProvider. Le contexte est déterminé par `stancl/tenancy` (central vs tenant) et par le domaine (tenant vs client vs ambassadeur).
+
+```php
+// app/Modules/IoT/Infrastructure/Providers/IoTServiceProvider.php
+
+public function boot(): void
+{
+    // Contexte tenant (admin régional OU portail client/ambassadeur)
+    if ($this->app->bound('tenancy') && tenancy()->initialized) {
+
+        // Routes admin régional — domaine : {region}.cekoya.fr
+        if ($this->isTenantPortal()) {
+            $this->loadRoutesFrom(__DIR__ . '/../../routes/tenant.php');
+        }
+
+        // Routes client — domaine : {region}-client.cekoya.fr
+        if ($this->isClientPortal()) {
+            $this->loadRoutesFrom(__DIR__ . '/../../routes/client.php');
+        }
+    }
+
+    // Le module IoT n'a pas de routes sur le Hub central
+    // → pas de chargement en contexte central
+}
+```
+
+```php
+// app/Modules/Central/Infrastructure/Providers/CentralServiceProvider.php
+
+public function boot(): void
+{
+    // Le module Central ne charge ses routes QUE sur le Hub
+    if ($this->isCentralDomain()) {
+        $this->loadRoutesFrom(__DIR__ . '/../../routes/central.php');
+    }
+    // En contexte tenant → le module ne fait rien, il n'est pas chargé
+}
+```
+
+**Helpers de détection du portail** (trait partagé) :
+
+```php
+// app/Shared/Traits/DetectsPortal.php
+
+trait DetectsPortal
+{
+    protected function isCentralDomain(): bool
+    {
+        return request()->getHost() === config('tenancy.central_domains')[0];
+    }
+
+    protected function isTenantPortal(): bool
+    {
+        $host = request()->getHost();
+        return !$this->isCentralDomain()
+            && !str_contains($host, '-client.')
+            && !str_contains($host, '-amba.');
+    }
+
+    protected function isClientPortal(): bool
+    {
+        return str_contains(request()->getHost(), '-client.');
+    }
+
+    protected function isAmbassadorPortal(): bool
+    {
+        return str_contains(request()->getHost(), '-amba.');
+    }
+}
+```
+
+#### Convention de nommage des routes
+
+Chaque fichier de routes utilise un préfixe de nom qui identifie le portail, suivi du nom du module :
+
+```php
+// app/Modules/IoT/routes/tenant.php
+Route::middleware(['web', 'auth', 'tenant'])
+    ->prefix('iot')
+    ->name('tenant.iot.')
+    ->group(function () {
+        Route::get('/sims', [SimController::class, 'index'])->name('sims.index');
+        Route::get('/quotas', [QuotaController::class, 'index'])->name('quotas.index');
+        Route::post('/sims', [SimController::class, 'store'])->name('sims.store');
+        // ... gestion complète
+    });
+
+// app/Modules/IoT/routes/client.php
+Route::middleware(['web', 'auth', 'client', 'client.ownership'])
+    ->prefix('iot')
+    ->name('client.iot.')
+    ->group(function () {
+        Route::get('/dashboard', [ClientIoTDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/sims', [ClientSimController::class, 'index'])->name('sims.index');
+        // ... vue limitée, lecture seule principalement
+    });
+
+// app/Modules/Central/routes/central.php
+Route::middleware(['web', 'auth', 'central', 'role:super_admin'])
+    ->prefix('hub')
+    ->name('central.')
+    ->group(function () {
+        Route::get('/dashboard', [HubDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/regions', [RegionController::class, 'index'])->name('regions.index');
+        // ...
+    });
+```
+
+Cela donne des noms de routes lisibles et sans ambiguïté :
+- `tenant.iot.sims.index` → admin gère les SIMs IoT
+- `client.iot.sims.index` → client voit ses SIMs IoT
+- `central.dashboard` → dashboard Hub
+
+> **Note multi-région** : Les modules s'exécutent dans chaque instance régionale. Le module `Central/` ne tourne que sur le Hub et gère la synchronisation catalogue, le registry des régions et le SSO. Son ServiceProvider ne charge rien en contexte tenant.
 
 ### Séparation des domaines métier : Telecom vs IoT vs UCaaS vs Infogérance
 
