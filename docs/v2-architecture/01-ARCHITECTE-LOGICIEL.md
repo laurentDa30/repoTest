@@ -17,7 +17,7 @@
 | **Table `calls` à 12 Go sans `client_id`** | Pas de `client_id` direct → chaque requête CDR par client nécessite un JOIN via `lines` sur 12 Go+. Pas de partitionnement. | CRITIQUE |
 | **Table `invoices` = JSON blob** | `doc` (JSON) contient l'intégralité de la facture ; GENERATED STORED extraient les champs résumés. Chaque SELECT charge le JSON complet → mémoire saturée | CRITIQUE |
 | **3 portails dans 1 seul repo/app** | Déploiement monobloc, risque de régression croisée | ÉLEVÉ |
-| **Pas de Docker** | Pas de reproductibilité env, déploiements manuels risqués | MOYEN |
+| **Pas de Docker pour les services** | Postgres, Redis, mail non conteneurisés → "ça marche sur ma machine", création de tenants (BDD) non reproductible entre devs | MOYEN |
 | **Pas de CI/CD** | Pas de filet de sécurité, tests manuels | MOYEN |
 | **Hébergement local** | SPOF, pas de scaling, pas de redondance | ÉLEVÉ |
 | **Pas de cache applicatif** | Requêtes BDD répétées inutilement | MOYEN |
@@ -39,9 +39,9 @@ Avec 2 développeurs, les microservices sont **contre-productifs** :
 
 ```
 Hub Central ──── catalogue partagé, monitoring, SSO
-    ├── Région IDF (App + BDD propre)
-    ├── Région PACA (App + BDD propre)
-    └── Région Lyon (App + BDD propre)
+    ├── Région Réunion (App + BDD propre)  ← V1 actuelle, première région
+    ├── Région Métropole (App + BDD propre)
+    └── Région Mayotte (App + BDD propre)
 ```
 
 **Implémentation** : `stancl/tenancy` v3 avec database-per-tenant. Codebase unique, switch automatique de BDD par sous-domaine. La V1 actuelle devient la première région (zéro migration de données initiale).
@@ -572,7 +572,98 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 
 > **Note multi-région** : Chaque BDD régionale contient ses propres factures. Le Hub central agrège uniquement les totaux dans `regional_summaries`.
 
-## 5. Risques identifiés
+## 5. Infrastructure de développement
+
+### Docker : services uniquement, app en natif
+
+L'app PHP tourne en **natif** (Laravel Herd, Valet ou `php artisan serve`). Seuls les **services annexes** sont conteneurisés — c'est plus rapide pour le dev, pas de volume mount lent, hot reload natif.
+
+L'app sera dockerisée intégralement **uniquement pour le staging/production**.
+
+```yaml
+# docker-compose.yml — services uniquement
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cekoya
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"   # UI web
+      - "1025:1025"   # SMTP
+
+volumes:
+  pgdata:
+```
+
+**Pourquoi Docker dès le jour 1 pour les services :**
+- **Parité dev** : avec multi-tenant database-per-tenant, chaque dev doit pouvoir créer des BDD dynamiquement. Docker Postgres = une commande.
+- **Multi-domaines locaux** : résolution de `hub.cekoya.local`, `reunion.cekoya.local`, `reunion-client.cekoya.local` — un reverse proxy Traefik/Caddy conteneurisé rend ça trivial.
+- **Services annexes** : Redis (cache + queue), Mailpit (mail catcher), éventuellement Meilisearch — aucun à installer sur la machine hôte.
+
+### Tenant = Base de données (stancl/tenancy)
+
+Un tenant correspond à **une base de données isolée**. La création d'un tenant est une opération SQL standard, indépendante de Docker.
+
+```
+PostgreSQL
+├── cekoya_central          # Base centrale (Hub)
+│   ├── tenants              # Registry des tenants
+│   ├── domains              # Mapping domaine → tenant
+│   ├── central_catalog      # Catalogue maître
+│   └── users                # Users centraux (SSO)
+│
+├── cekoya_reunion           # Tenant Réunion (= V1 migrée)
+│   ├── clients, prospects, telecom_lines, iot_sims...
+│   └── ...                  # Toutes les tables métier
+│
+├── cekoya_metropole         # Tenant Métropole
+│   └── ...                  # Même schéma, données isolées
+│
+└── cekoya_mayotte           # Tenant Mayotte
+    └── ...
+```
+
+**Création d'un tenant** — 3 étapes automatisées par stancl/tenancy :
+
+```php
+// Fonctionne partout — Docker ou pas, du moment que Postgres est accessible
+$tenant = Tenant::create([
+    'id' => 'reunion',
+    'name' => 'Cekoya Réunion',
+]);
+// stancl/tenancy déclenche automatiquement :
+// 1. CREATE DATABASE cekoya_reunion
+// 2. php artisan tenants:migrate --tenants=reunion
+// 3. Événements TenantCreated → CreateDatabase → MigrateDatabase
+
+// Ajout du domaine associé
+$tenant->domains()->create(['domain' => 'reunion.cekoya.fr']);
+```
+
+**Prérequis unique** : l'utilisateur PostgreSQL doit avoir le droit `CREATE DATABASE`. C'est une config Postgres, pas une dépendance Docker.
+
+**Modes de création de tenants :**
+| Contexte | Méthode |
+|----------|---------|
+| Dev local | `php artisan tenant:create reunion` (commande artisan) |
+| Dev local | `php artisan db:seed --class=TenantSeeder` (seeder avec données de test) |
+| Production | Interface Hub central (UI d'admin réservée super_admin) |
+| CI/CD | Seeder automatique dans le pipeline de test |
+
+## 6. Risques identifiés
 
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
@@ -581,7 +672,7 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 | Régression fonctionnelle | Moyenne | Élevé | Tests automatisés avant chaque migration de module |
 | Résistance au changement utilisateurs | Moyenne | Moyen | Migration progressive, UX similaire initialement |
 
-## 6. Points d'attention long terme
+## 7. Points d'attention long terme
 
 1. **Ne jamais coupler les modules** — c'est le premier réflexe sous pression et c'est ce qui a mené à la V1 actuelle
 2. **L'API interne est l'investissement le plus structurant** — elle permet de découpler les portails et prépare une future app mobile
@@ -593,7 +684,7 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 ---
 
 > **Priorisation** :
-> - Court terme (0-3 mois) : Dockerisation, CI/CD, quick wins CDR (`client_id` + agrégation), Redis, Laravel 12, **install stancl/tenancy + BDD centrale**
+> - Court terme (0-3 mois) : Docker services (Postgres, Redis, Mailpit), CI/CD, quick wins CDR (`client_id` + agrégation), Laravel 12, **install stancl/tenancy + BDD centrale + premier tenant (Réunion = V1)**
 > - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 4, **sync catalogue + SSO**
 > - Long terme (6-12 mois) : Portails client/amba Livewire 4, migration cloud, **provisioning auto de régions**, scaling
 
