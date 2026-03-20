@@ -37,7 +37,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 |--------|------------|---------------|
 | Backend | Laravel 12 | Continuité de compétences, écosystème riche |
 | Multi-tenant | stancl/tenancy v3 (database-per-tenant) | Isolation BDD par région, codebase unique |
-| Frontend (tous portails) | Livewire 4 + Alpine.js + Tailwind CSS | Stack unifiée, productivité maximale pour 2 devs backend-first |
+| Frontend (tous portails) | Livewire 4 + Alpine.js | Stack unifiée, productivité maximale pour 2 devs backend-first |
 | Base relationnelle | MySQL 8.0 (1 BDD central + 1 BDD/région) | Isolation pannes, RGPD, scaling indépendant |
 | CDR/Time-series | MySQL 8.0 partitionné + tables d'agrégation | Résout le problème 12 Go sans nouvelle techno |
 | Cache / Queue | Redis 7 | Cache, sessions, queues, rate limiting |
