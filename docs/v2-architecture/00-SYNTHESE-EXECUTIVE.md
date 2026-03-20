@@ -76,18 +76,6 @@ Les requêtes CDR par client nécessitent un JOIN systématique via `lines`. Ave
 
 **Solution V2** : Ajouter `client_id` dénormalisé + index composite. Quick win réalisable en 1 jour.
 
-### Point positif : `monthly_summaries` existe déjà
-
-L'agrégation mensuelle par ligne est en place. Il manque l'agrégation quotidienne et les colonnes financières.
-
-### Point positif : `cdr_files` assure la traçabilité des imports
-
-Le lien `calls.cdr_file_id` permet l'idempotence et la traçabilité.
-
-### Dette technique : tables `_bkp` et double système de tarification
-
-Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` correspondent à une **migration de la tarification en cours**. Le nouveau système (`plan_rates` normalisé) est en train de remplacer l'ancien (`pricing_zones` dénormalisé). Les tables `_bkp` sont des sauvegardes de sécurité de cette transition. Une fois la migration confirmée stable, ces tables pourront être supprimées.
-
 ---
 
 > Détails complets dans les documents d'analyse par rôle :
