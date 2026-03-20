@@ -230,7 +230,7 @@ final readonly class CreateClientDTO
 
 ---
 
-## 4. Conventions Frontend (Livewire 4 + Tailwind)
+## 4. Conventions Frontend (Livewire 4 + Bootstrap + Chart.js)
 
 ### Composants Livewire
 - Un composant = une responsabilité
@@ -244,11 +244,16 @@ final readonly class CreateClientDTO
 - Préfixe `x-` pour les composants Blade (convention Laravel)
 - Pas de logique PHP dans les templates Blade — uniquement affichage
 
-### Tailwind CSS
-- Pas de CSS custom sauf cas exceptionnel
-- Utiliser les classes utilitaires Tailwind
-- Configuration dans `tailwind.config.js` pour les couleurs/fonts du design system
-- Préfixer si coexistence Bootstrap : `tw-` prefix dans la config Tailwind
+### Bootstrap (conservé)
+- Utiliser les classes Bootstrap 5 standard
+- Personnalisations centralisées dans `_variables.scss` ou `app.css`
+- Pas de CSS inline — toujours via classes Bootstrap ou classes custom documentées
+- Nettoyer les overrides orphelins lors des refactos de vues
+
+### Chart.js (conservé)
+- Chart.js v4 via CDN
+- Licence MIT — gratuit sans restriction
+- Intégration via Alpine.js (composant Livewire + `x-data` Alpine pour initialiser le chart)
 
 ---
 
