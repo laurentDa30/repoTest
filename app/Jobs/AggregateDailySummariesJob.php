@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Enums\CallTypeEnum;
 use App\Models\DailySummary;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -22,15 +23,6 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
     public int $tries = 3;
     public int $backoff = 60;
     public int $timeout = 600;
-
-    // CallTypeEnum values
-    private const CALL_TYPE_VOICE = 1;
-    private const CALL_TYPE_SMS = 2;
-    private const CALL_TYPE_MMS = 3;
-    private const CALL_TYPE_DATA = 4;
-    private const CALL_TYPE_SMS_SPECIAL = 5;
-    private const CALL_TYPE_VOICE_SPECIAL = 6;
-    private const CALL_TYPE_VOICEMAIL = 7;
 
     public function __construct(
         public readonly ?string $date = null
@@ -62,13 +54,9 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
      */
     private function aggregateCalls(string $date): int
     {
-        $voice = self::CALL_TYPE_VOICE;
-        $sms = self::CALL_TYPE_SMS;
-        $mms = self::CALL_TYPE_MMS;
-        $data = self::CALL_TYPE_DATA;
-        $smsSpecial = self::CALL_TYPE_SMS_SPECIAL;
-        $voiceSpecial = self::CALL_TYPE_VOICE_SPECIAL;
-        $voicemail = self::CALL_TYPE_VOICEMAIL;
+        $smsTypes = implode(',', [CallTypeEnum::SMS->value, CallTypeEnum::SMS_SPECIAL->value]);
+        $voiceTypes = implode(',', [CallTypeEnum::VOICE->value, CallTypeEnum::VOICE_SPECIAL->value, CallTypeEnum::VOICEMAIL->value]);
+        $dataType = CallTypeEnum::DATA->value;
 
         $rows = DB::table('calls')
             ->join('lines', 'calls.line_id', '=', 'lines.id')
@@ -78,13 +66,13 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
                 'lines.telecom_type_id',
                 DB::raw("DATE(calls.date) as date"),
                 // SMS : normaux + surtaxés
-                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$sms}, {$smsSpecial}) THEN 1 ELSE 0 END) as sms"),
-                DB::raw("SUM(CASE WHEN calls.call_type_id = {$mms} THEN 1 ELSE 0 END) as mms"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$smsTypes}) THEN 1 ELSE 0 END) as sms"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id = " . CallTypeEnum::MMS->value . " THEN 1 ELSE 0 END) as mms"),
                 // Appels : voix + surtaxés + messagerie vocale
-                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voice}, {$voiceSpecial}, {$voicemail}) THEN 1 ELSE 0 END) as calls"),
-                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voice}, {$voiceSpecial}, {$voicemail}) THEN calls.duration ELSE 0 END) as calls_duration"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voiceTypes}) THEN 1 ELSE 0 END) as calls"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voiceTypes}) THEN calls.duration ELSE 0 END) as calls_duration"),
                 // Data mobile uniquement (xDSL/FTTX vient de LibreNMS)
-                DB::raw("SUM(CASE WHEN calls.call_type_id = {$data} THEN calls.volume ELSE 0 END) as data"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id = {$dataType} THEN calls.volume ELSE 0 END) as data"),
                 // Hors forfait
                 DB::raw("SUM(CASE WHEN calls.out_of_plan = 1 THEN calls.price ELSE 0 END) as out_of_plan"),
                 DB::raw("SUM(calls.charge) as total_charge"),
