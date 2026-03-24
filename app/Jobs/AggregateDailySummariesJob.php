@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Enums\CallTypeEnum;
+use App\Enums\TelecomTypeEnum;
 use App\Models\DailySummary;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -84,6 +85,7 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
                 DB::raw("SUM(calls.price) as total_price"),
             ])
             ->whereDate('calls.date', $date)
+            ->where('lines.telecom_type_id', '!=', TelecomTypeEnum::IOT->value)
             ->groupBy('calls.line_id', 'lines.client_id', 'lines.telecom_type_id', DB::raw("DATE(calls.date)"))
             ->get();
 
