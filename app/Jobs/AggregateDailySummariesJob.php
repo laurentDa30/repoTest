@@ -23,6 +23,15 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
     public int $backoff = 60;
     public int $timeout = 600;
 
+    // CallTypeEnum values
+    private const CALL_TYPE_VOICE = 1;
+    private const CALL_TYPE_SMS = 2;
+    private const CALL_TYPE_MMS = 3;
+    private const CALL_TYPE_DATA = 4;
+    private const CALL_TYPE_SMS_SPECIAL = 5;
+    private const CALL_TYPE_VOICE_SPECIAL = 6;
+    private const CALL_TYPE_VOICEMAIL = 7;
+
     public function __construct(
         public readonly ?string $date = null
     ) {}
@@ -39,8 +48,9 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
         Log::info("[AggregateDailySummaries] Début agrégation pour {$date}");
 
         $aggregated = $this->aggregateCalls($date);
+        $xdslUpdated = $this->aggregateXdslFttx($date);
 
-        Log::info("[AggregateDailySummaries] {$aggregated} résumés upsertés pour {$date}");
+        Log::info("[AggregateDailySummaries] {$aggregated} résumés upsertés, {$xdslUpdated} lignes xDSL/FTTX mises à jour pour {$date}");
     }
 
     /**
@@ -52,6 +62,14 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
      */
     private function aggregateCalls(string $date): int
     {
+        $voice = self::CALL_TYPE_VOICE;
+        $sms = self::CALL_TYPE_SMS;
+        $mms = self::CALL_TYPE_MMS;
+        $data = self::CALL_TYPE_DATA;
+        $smsSpecial = self::CALL_TYPE_SMS_SPECIAL;
+        $voiceSpecial = self::CALL_TYPE_VOICE_SPECIAL;
+        $voicemail = self::CALL_TYPE_VOICEMAIL;
+
         $rows = DB::table('calls')
             ->join('lines', 'calls.line_id', '=', 'lines.id')
             ->select([
@@ -59,12 +77,15 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
                 'lines.client_id',
                 'lines.telecom_type_id',
                 DB::raw("DATE(calls.date) as date"),
-                DB::raw("SUM(CASE WHEN calls.type = 'sms' THEN 1 ELSE 0 END) as sms"),
-                DB::raw("SUM(CASE WHEN calls.type = 'mms' THEN 1 ELSE 0 END) as mms"),
-                DB::raw("SUM(CASE WHEN calls.type = 'voice' THEN 1 ELSE 0 END) as calls"),
-                DB::raw("SUM(CASE WHEN calls.type = 'voice' THEN calls.duration ELSE 0 END) as calls_duration"),
-                DB::raw("SUM(CASE WHEN calls.type = 'data' THEN calls.volume ELSE 0 END) as data"),
-                DB::raw("SUM(CASE WHEN calls.type = 'data_xdsl_fttx' THEN calls.volume ELSE 0 END) as data_xdsl_fttx"),
+                // SMS : normaux + surtaxés
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$sms}, {$smsSpecial}) THEN 1 ELSE 0 END) as sms"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id = {$mms} THEN 1 ELSE 0 END) as mms"),
+                // Appels : voix + surtaxés + messagerie vocale
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voice}, {$voiceSpecial}, {$voicemail}) THEN 1 ELSE 0 END) as calls"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voice}, {$voiceSpecial}, {$voicemail}) THEN calls.duration ELSE 0 END) as calls_duration"),
+                // Data mobile uniquement (xDSL/FTTX vient de LibreNMS)
+                DB::raw("SUM(CASE WHEN calls.call_type_id = {$data} THEN calls.volume ELSE 0 END) as data"),
+                // Hors forfait
                 DB::raw("SUM(CASE WHEN calls.out_of_plan = 1 THEN calls.price ELSE 0 END) as out_of_plan"),
                 DB::raw("SUM(calls.charge) as total_charge"),
                 DB::raw("SUM(calls.price) as total_price"),
@@ -88,11 +109,10 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
             'calls' => $row->calls,
             'calls_duration' => $row->calls_duration,
             'data' => $row->data,
-            'data_xdsl_fttx' => $row->data_xdsl_fttx,
+            'data_xdsl_fttx' => 0, // rempli par aggregateXdslFttx()
             'out_of_plan' => $row->out_of_plan,
             'total_charge' => $row->total_charge,
             'total_price' => $row->total_price,
-            // Carbone : calculé séparément ou via un listener
             'carbon_sms' => 0,
             'carbon_mms' => 0,
             'carbon_calls' => 0,
@@ -105,7 +125,6 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
             'created_at' => now(),
         ])->toArray();
 
-        // Upsert par batch de 500 — idempotent sur (line_id, date, telecom_type_id)
         foreach (array_chunk($upsertData, 500) as $chunk) {
             DailySummary::upsert(
                 $chunk,
@@ -117,7 +136,6 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
                     'calls',
                     'calls_duration',
                     'data',
-                    'data_xdsl_fttx',
                     'out_of_plan',
                     'total_charge',
                     'total_price',
@@ -127,6 +145,63 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
         }
 
         return $rows->count();
+    }
+
+    /**
+     * Récupère les données xDSL/FTTX depuis LibreNMS et met à jour
+     * les daily_summaries existants pour la date donnée.
+     *
+     * LibreNMS est la source de vérité pour le trafic fixe —
+     * cette donnée n'existe pas dans la table `calls`.
+     */
+    private function aggregateXdslFttx(string $date): int
+    {
+        $startDate = Carbon::parse($date);
+        $librenmsDatas = (new \App\Services\LibrenmsService('bills', $startDate))->fetchLibrenmsData();
+
+        if (!isset($librenmsDatas) || ($librenmsDatas['status'] ?? null) !== 'ok') {
+            Log::warning("[AggregateDailySummaries] LibreNMS indisponible ou erreur pour {$date}");
+            return 0;
+        }
+
+        $bills = $librenmsDatas['bills'] ?? [];
+        $updated = 0;
+
+        foreach ($bills as $bill) {
+            $lineId = $bill['line_id'] ?? null;
+            $trafTotal = $bill['history']['traf_total'] ?? 0;
+
+            if (!$lineId || $trafTotal <= 0) {
+                continue;
+            }
+
+            $affected = DailySummary::where('line_id', $lineId)
+                ->where('date', $date)
+                ->update(['data_xdsl_fttx' => $trafTotal]);
+
+            // Si pas encore de summary pour cette ligne (pas de CDR telecom ce jour),
+            // on en crée un avec uniquement la data xDSL/FTTX
+            if ($affected === 0) {
+                $line = DB::table('lines')
+                    ->select('client_id', 'telecom_type_id')
+                    ->where('id', $lineId)
+                    ->first();
+
+                if ($line) {
+                    DailySummary::create([
+                        'line_id' => $lineId,
+                        'client_id' => $line->client_id,
+                        'telecom_type_id' => $line->telecom_type_id,
+                        'date' => $date,
+                        'data_xdsl_fttx' => $trafTotal,
+                    ]);
+                }
+            }
+
+            $updated++;
+        }
+
+        return $updated;
     }
 
     private function getDate(): string
