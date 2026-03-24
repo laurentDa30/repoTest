@@ -25,7 +25,8 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
     public int $timeout = 600;
 
     public function __construct(
-        public readonly ?string $date = null
+        public readonly ?string $date = null,
+        public readonly bool $withXdslFttx = true,
     ) {}
 
     public function uniqueId(): string
@@ -40,7 +41,11 @@ class AggregateDailySummariesJob implements ShouldQueue, ShouldBeUnique
         Log::info("[AggregateDailySummaries] Début agrégation pour {$date}");
 
         $aggregated = $this->aggregateCalls($date);
-        $xdslUpdated = $this->aggregateXdslFttx($date);
+        $xdslUpdated = 0;
+
+        if ($this->withXdslFttx) {
+            $xdslUpdated = $this->aggregateXdslFttx($date);
+        }
 
         Log::info("[AggregateDailySummaries] {$aggregated} résumés upsertés, {$xdslUpdated} lignes xDSL/FTTX mises à jour pour {$date}");
     }
