@@ -20,10 +20,17 @@ class DailyIotSummary extends Model
         'client_id',
         'date',
         'telecom_type_id',
+        'sms',
+        'mms',
+        'calls',
+        'calls_duration',
         'data',
         'out_of_plan',
         'total_charge',
         'total_price',
+        'carbon_sms',
+        'carbon_mms',
+        'carbon_calls',
         'carbon_datas_mobile',
         'carbon_devices',
         'carbon_total',
@@ -33,10 +40,17 @@ class DailyIotSummary extends Model
     {
         return [
             'date' => 'date',
+            'sms' => 'integer',
+            'mms' => 'integer',
+            'calls' => 'integer',
+            'calls_duration' => 'integer',
             'data' => 'integer',
             'out_of_plan' => 'decimal:2',
             'total_charge' => 'decimal:8',
             'total_price' => 'decimal:8',
+            'carbon_sms' => 'decimal:8',
+            'carbon_mms' => 'decimal:8',
+            'carbon_calls' => 'decimal:8',
             'carbon_datas_mobile' => 'float',
             'carbon_devices' => 'float',
             'carbon_total' => 'float',
@@ -98,7 +112,10 @@ class DailyIotSummary extends Model
     public function totalCarbon(): float
     {
         return $this->carbon_total ?? (
-            $this->carbon_datas_mobile
+            $this->carbon_sms
+            + $this->carbon_mms
+            + $this->carbon_calls
+            + $this->carbon_datas_mobile
             + $this->carbon_devices
         );
     }

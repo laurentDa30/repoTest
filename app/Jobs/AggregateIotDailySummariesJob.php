@@ -50,12 +50,15 @@ class AggregateIotDailySummariesJob implements ShouldQueue, ShouldBeUnique
      * groupés par (line_id, client_id, telecom_type_id, date).
      *
      * Filtre uniquement les lignes IoT (telecom_type_id = IOT).
-     * L'IoT est essentiellement de la data — pas de SMS/MMS/appels.
+     * Majoritairement data, mais les SIMs IoT peuvent émettre
+     * des SMS/appels (surtaxés car hors usage normal).
      *
      * Idempotent : upsert recalcule depuis la source à chaque exécution.
      */
     private function aggregateIotCalls(string $date): int
     {
+        $smsTypes = implode(',', [CallTypeEnum::SMS->value, CallTypeEnum::SMS_SPECIAL->value]);
+        $voiceTypes = implode(',', [CallTypeEnum::VOICE->value, CallTypeEnum::VOICE_SPECIAL->value, CallTypeEnum::VOICEMAIL->value]);
         $dataType = CallTypeEnum::DATA->value;
         $iotType = TelecomTypeEnum::IOT->value;
 
@@ -66,6 +69,10 @@ class AggregateIotDailySummariesJob implements ShouldQueue, ShouldBeUnique
                 'lines.client_id',
                 'lines.telecom_type_id',
                 DB::raw("DATE(calls.date) as date"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$smsTypes}) THEN 1 ELSE 0 END) as sms"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id = " . CallTypeEnum::MMS->value . " THEN 1 ELSE 0 END) as mms"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voiceTypes}) THEN 1 ELSE 0 END) as calls"),
+                DB::raw("SUM(CASE WHEN calls.call_type_id IN ({$voiceTypes}) THEN calls.duration ELSE 0 END) as calls_duration"),
                 DB::raw("SUM(CASE WHEN calls.call_type_id = {$dataType} THEN calls.volume ELSE 0 END) as data"),
                 DB::raw("SUM(CASE WHEN calls.out_of_plan = 1 THEN calls.price ELSE 0 END) as out_of_plan"),
                 DB::raw("SUM(calls.charge) as total_charge"),
@@ -86,10 +93,17 @@ class AggregateIotDailySummariesJob implements ShouldQueue, ShouldBeUnique
             'client_id' => $row->client_id,
             'telecom_type_id' => $row->telecom_type_id,
             'date' => $row->date,
+            'sms' => $row->sms,
+            'mms' => $row->mms,
+            'calls' => $row->calls,
+            'calls_duration' => $row->calls_duration,
             'data' => $row->data,
             'out_of_plan' => $row->out_of_plan,
             'total_charge' => $row->total_charge,
             'total_price' => $row->total_price,
+            'carbon_sms' => 0,
+            'carbon_mms' => 0,
+            'carbon_calls' => 0,
             'carbon_datas_mobile' => 0,
             'carbon_devices' => 0,
             'carbon_total' => 0,
@@ -103,6 +117,10 @@ class AggregateIotDailySummariesJob implements ShouldQueue, ShouldBeUnique
                 uniqueBy: ['line_id', 'date', 'telecom_type_id'],
                 update: [
                     'client_id',
+                    'sms',
+                    'mms',
+                    'calls',
+                    'calls_duration',
                     'data',
                     'out_of_plan',
                     'total_charge',
