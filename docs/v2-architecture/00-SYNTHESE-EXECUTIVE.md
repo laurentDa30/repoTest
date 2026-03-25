@@ -119,26 +119,27 @@ Objectif : structurer le code, mettre en place les outils transverses, isoler le
 | Étape | Détail | Source | Statut |
 |-------|--------|--------|--------|
 | **2.1** | Redis (cache, sessions, queues) — remplacement sessions fichier | `03-BACKEND` §cache, `02-DEVOPS` | À faire |
-| **2.2** | Laravel Horizon (monitoring queues, supervisors séparés : `default`, `imports`, `billing`) | `03-BACKEND` §queues, `02-DEVOPS` §worker | À faire |
+| **2.2** | Laravel Horizon (monitoring queues, supervisors séparés : `default`, `imports`, `billing`, `aggregation`) | `03-BACKEND` §queues, `02-DEVOPS` §worker | À faire |
 | **2.3** | Worker séparé via Supervisord (voir détail doc `02-DEVOPS` §2) | `02-DEVOPS` §worker séparé | À faire |
-| **2.4** | Audit trail — `spatie/laravel-activitylog` sur modèles sensibles (obligation RGPD télécom/finance) | `06-CYBERSECURITE` §5, `01-ARCHITECTE` | À faire |
-| **2.5** | CI/CD GitLab CI (Pint → PHPStan → tests Pest → build → deploy staging auto, prod manuelle) | `02-DEVOPS` §4 | À faire |
+| **2.4** | Concurrence et intégrité des données : optimistic lock sur modèles éditables, cache lock Redis sur jobs critiques, queues sérialisées, idempotence | `18-CONCURRENCE-INTEGRITE` | À faire |
+| **2.5** | Audit trail — `spatie/laravel-activitylog` sur modèles sensibles (obligation RGPD télécom/finance) | `06-CYBERSECURITE` §5, `01-ARCHITECTE` | À faire |
+| **2.6** | CI/CD GitLab CI (Pint → PHPStan → tests Pest → build → deploy staging auto, prod manuelle) | `02-DEVOPS` §4 | À faire |
 
 #### 2B — API et intégrations
 
 | Étape | Détail | Source | Statut |
 |-------|--------|--------|--------|
-| **2.6** | API REST `/api/v1/*` — **uniquement liaisons clients** (espace client, intégrations partenaires, future app mobile). Hub & régions restent en architecture classique Livewire | `01-ARCHITECTE` §API, `04-FRONTEND` §6 | À faire |
-| **2.7** | Pattern Gateway fournisseurs : `TransatelGateway`, `UnycGateway`, `WazoGateway`, etc. derrière interfaces (`MobileProviderGateway`, `UCaaSProviderGateway`) — isolation des connecteurs | `03-BACKEND` §intégrations, `01-ARCHITECTE` §7.4 | À faire |
-| **2.8** | Laravel Scout + database driver (recherche clients, lignes, catalogue — scopé par tenant) | `01-ARCHITECTE` §revue, `03-BACKEND` | À faire |
+| **2.7** | API REST `/api/v1/*` — **uniquement liaisons clients** (espace client, intégrations partenaires, future app mobile). Hub & régions restent en architecture classique Livewire | `01-ARCHITECTE` §API, `04-FRONTEND` §6 | À faire |
+| **2.8** | Pattern Gateway fournisseurs : `TransatelGateway`, `UnycGateway`, `WazoGateway`, etc. derrière interfaces (`MobileProviderGateway`, `UCaaSProviderGateway`) — isolation des connecteurs | `03-BACKEND` §intégrations, `01-ARCHITECTE` §7.4 | À faire |
+| **2.9** | Laravel Scout + database driver (recherche clients, lignes, catalogue — scopé par tenant) | `01-ARCHITECTE` §revue, `03-BACKEND` | À faire |
 
 #### 2C — Modularisation
 
 | Étape | Détail | Source | Statut |
 |-------|--------|--------|--------|
-| **2.9** | Modularisation DDD-lite progressive (Strangler Fig) — module par module : `Client`, `Telecom`, `IoT`, `UCaaS`, `Billing`, `CDR`, `Catalog`, `Stock`, `Integration`, `Ticket`, `Order`, `Ambassador`, `Environment`, `Content`, `Auth`, `Finance`, `IA` | `01-ARCHITECTE` §2, `12-CONVENTIONS-CODE` | À faire |
-| **2.10** | Contrat `Billable` inter-modules (facturation unifiée : chaque module facturable implémente l'interface) | `01-ARCHITECTE` §Billable | À faire |
-| **2.11** | Contrat `CollaboratorContract` (collaborateur = centre de coût client, pivot entre Telecom/Stock/Infogérance) | `01-ARCHITECTE` §collaborateur | À faire |
+| **2.10** | Modularisation DDD-lite progressive (Strangler Fig) — module par module : `Client`, `Telecom`, `IoT`, `UCaaS`, `Billing`, `CDR`, `Catalog`, `Stock`, `Integration`, `Ticket`, `Order`, `Ambassador`, `Environment`, `Content`, `Auth`, `Finance`, `IA` | `01-ARCHITECTE` §2, `12-CONVENTIONS-CODE` | À faire |
+| **2.11** | Contrat `Billable` inter-modules (facturation unifiée : chaque module facturable implémente l'interface) | `01-ARCHITECTE` §Billable | À faire |
+| **2.12** | Contrat `CollaboratorContract` (collaborateur = centre de coût client, pivot entre Telecom/Stock/Infogérance) | `01-ARCHITECTE` §collaborateur | À faire |
 
 ### Phase 3 — Multi-région, portails et sécurité
 
@@ -239,3 +240,8 @@ Nouvelles tables `call_iots` et `call_ucass` pour séparer les CDR IoT et UCaaS 
 > - `11-VERIFICATIONS-ANOMALIES.md` — Vérifications existantes V1 à porter (lignes, matériel, forfaits, quotas IoT, hors-forfait data)
 > - `12-CONVENTIONS-CODE.md` — Standards et conventions de code V2 (PHP, Laravel, DDD-lite, Git, tests)
 > - `13-POINTS-REUNION.md` — Points en attente de décision collective (direct_debit_accounts, numérotation factures, etc.)
+> - `14-STRATEGIE-TRANSITION-V1-V2.md` — Stratégie de transition progressive (Strangler Fig)
+> - `15-GUIDE-MONTEE-VERSION.md` — Guide de montée de version Laravel/Livewire
+> - `16-AUTH-NAVIGATION-MULTI-PORTAIL.md` — Authentification et navigation multi-portail
+> - `17-REFONTE-FACTURATION-CDR.md` — Refonte facturation (invoices_v2 + invoice_lines)
+> - `18-CONCURRENCE-INTEGRITE-DONNEES.md` — Concurrence et intégrité des données multi-portail (optimistic lock, cache lock, queues, idempotence)
