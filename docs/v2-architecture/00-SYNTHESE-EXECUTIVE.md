@@ -23,11 +23,11 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ## Décision structurante
 
-**Migration progressive (Strangler Fig)** — Pas de réécriture big-bang. La V2 se construit module par module en s'appuyant sur la base existante.
+**Migration progressive (Strangler Fig)** — Pas de réécriture. La V2 se construit module par module en s'appuyant sur la base existante.
 
 ## Architecture cible
 
-**Monolithe modulaire Laravel 12 + API-first + Multi-région Hub & Spoke**
+**Monolithe modulaire Laravel 13 + API-first + Multi-région Hub & Spoke**
 
 > Chaque agence régionale dispose de sa propre application et BDD isolée (modèle franchise). Un Hub central gère le catalogue partagé, le monitoring et l'accès cross-régions via SSO.
 
@@ -62,7 +62,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ---
 
-## Découvertes critiques après analyse du schéma SQL (80+ tables)
+##  Analyse du schéma SQL +80 tables
 
 ### Problème n°1 : `invoices.doc` est un JSON blob
 
@@ -83,10 +83,6 @@ L'agrégation mensuelle par ligne est en place. Il manque l'agrégation quotidie
 ### Point positif : `cdr_files` assure la traçabilité des imports
 
 Le lien `calls.cdr_file_id` permet l'idempotence et la traçabilité.
-
-### Dette technique : tables `_bkp` et double système de tarification
-
-Les tables `plan_rates_bkp`, `pricing_zones`, `supplier_zone_countries_bkp` correspondent à une **migration de la tarification en cours**. Le nouveau système (`plan_rates` normalisé) est en train de remplacer l'ancien (`pricing_zones` dénormalisé). Les tables `_bkp` sont des sauvegardes de sécurité de cette transition. Une fois la migration confirmée stable, ces tables pourront être supprimées.
 
 ---
 
