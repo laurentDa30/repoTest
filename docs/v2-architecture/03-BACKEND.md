@@ -310,7 +310,6 @@ Cache::tags(['catalog'])->flush();
 ### Laravel 10 → 12
 1. Laravel 10 → 11 d'abord (changements de structure : `bootstrap/app.php`, suppression de certains fichiers)
 2. Laravel 11 → 12 (changements mineurs)
-3. Utiliser **Laravel Shift** (service automatisé) pour les deux upgrades — économise des jours de travail
 
 ### Livewire 2 → 3 → 4
 - **2 → 3** : Changement majeur de syntaxe (`$wire`, lifecycle hooks, `#[On]`, etc.)
@@ -349,9 +348,6 @@ Cache::tags(['catalog'])->flush();
 
 ### 3. Health checks
 > Ajouter un endpoint `/health` qui vérifie : DB, Redis, queue size, dernière exécution des imports. Intégrable au load balancer pour retirer automatiquement un serveur défaillant.
-
-### 4. Laravel Shift pour l'upgrade
-> Excellent conseil. Le coût (~100$ pour les deux upgrades) est négligeable vs le temps gagné. À budgéter.
 
 ## Verdict
 Recommandations backend **solides et pragmatiques**. Le pattern Action + Gateway + Queue est exactement ce qu'il faut pour cette taille de projet. Pas de sur-ingénierie.
