@@ -517,6 +517,71 @@ CREATE TABLE `daily_call_summaries` (
 
 **Estimation** : 6 000 lignes × 365 jours = ~2.2M rows/an ≈ quelques centaines de Mo. Ridicule comparé aux 12 Go de `calls`.
 
+#### 1.2b Ajouter `daily_iot_summaries`
+
+```sql
+CREATE TABLE `daily_iot_summaries` (
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `client_id` bigint UNSIGNED NOT NULL,
+    `line_id` bigint UNSIGNED NOT NULL,
+    `sim_id` bigint UNSIGNED DEFAULT NULL,
+    `date` date NOT NULL,
+    `total_sessions` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_up_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_down_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_sms` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_charge` decimal(15,4) NOT NULL DEFAULT 0,
+    `total_price` decimal(15,4) NOT NULL DEFAULT 0,
+    `quota_used_pct` decimal(5,2) DEFAULT NULL,
+    `quota_alert_sent` tinyint(1) NOT NULL DEFAULT 0,
+    `created_at` timestamp NULL DEFAULT NULL,
+    `updated_at` timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `daily_iot_unique` (`client_id`, `line_id`, `date`),
+    KEY `idx_client_date` (`client_id`, `date`),
+    KEY `idx_sim_date` (`sim_id`, `date`),
+    FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
+    FOREIGN KEY (`line_id`) REFERENCES `lines` (`id`)
+) ENGINE=InnoDB;
+```
+
+**Spécificités IoT** : Les colonnes `data_up/down` (upload/download séparés), `quota_used_pct` et `quota_alert_sent` sont propres à l'IoT M2M — elles n'ont pas de sens dans les CDR mobile classiques, d'où la table séparée.
+
+**Rétention** : 18 mois (cf. §8.3).
+
+#### 1.2c Ajouter `daily_ucaas_summaries`
+
+```sql
+CREATE TABLE `daily_ucaas_summaries` (
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `client_id` bigint UNSIGNED NOT NULL,
+    `line_id` bigint UNSIGNED NOT NULL,
+    `date` date NOT NULL,
+    `total_calls_in` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_calls_out` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_duration_in_seconds` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_duration_out_seconds` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_conferences` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_conference_minutes` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_messages` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_voicemails` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_charge` decimal(15,4) NOT NULL DEFAULT 0,
+    `total_price` decimal(15,4) NOT NULL DEFAULT 0,
+    `created_at` timestamp NULL DEFAULT NULL,
+    `updated_at` timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `daily_ucaas_unique` (`client_id`, `line_id`, `date`),
+    KEY `idx_client_date` (`client_id`, `date`),
+    FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
+    FOREIGN KEY (`line_id`) REFERENCES `lines` (`id`)
+) ENGINE=InnoDB;
+```
+
+**Spécificités UCaaS** : Appels entrants/sortants séparés, conférences, messagerie, boîtes vocales — métriques propres à la téléphonie unifiée Wazo.
+
+**Rétention** : 18 mois (cf. §8.3).
+
 #### 1.3 Partitionner `calls`
 
 ```sql
@@ -862,7 +927,76 @@ JOIN lines l ON ms.line_id = l.id
 SET ms.client_id = l.client_id;
 ```
 
-#### 3.2 Ajouter `collaborator_id` manquant sur `sims`
+#### 3.2 Créer `monthly_iot_summaries`
+
+```sql
+CREATE TABLE `monthly_iot_summaries` (
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `client_id` bigint UNSIGNED NOT NULL,
+    `line_id` bigint UNSIGNED NOT NULL,
+    `sim_id` bigint UNSIGNED DEFAULT NULL,
+    `month` date NOT NULL,
+    `total_sessions` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_up_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_down_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_data_bytes` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_sms` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_charge` decimal(15,4) NOT NULL DEFAULT 0,
+    `total_price` decimal(15,4) NOT NULL DEFAULT 0,
+    `avg_quota_used_pct` decimal(5,2) DEFAULT NULL,
+    `peak_quota_used_pct` decimal(5,2) DEFAULT NULL,
+    `days_with_alert` int UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` timestamp NULL DEFAULT NULL,
+    `updated_at` timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `monthly_iot_unique` (`client_id`, `line_id`, `month`),
+    KEY `idx_client_month` (`client_id`, `month`),
+    KEY `idx_sim_month` (`sim_id`, `month`),
+    FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
+    FOREIGN KEY (`line_id`) REFERENCES `lines` (`id`)
+) ENGINE=InnoDB;
+```
+
+**Colonnes spécifiques** : `avg_quota_used_pct` (moyenne mensuelle), `peak_quota_used_pct` (pic), `days_with_alert` — agrégations depuis les daily IoT. Utile pour l'IA détection d'anomalies (doc 10).
+
+**Rétention** : 7 ans (cf. §8.3). Volume négligeable.
+
+**Job d'agrégation** : Exécuté le 1er de chaque mois, agrège les `daily_iot_summaries` du mois précédent.
+
+#### 3.3 Créer `monthly_ucaas_summaries`
+
+```sql
+CREATE TABLE `monthly_ucaas_summaries` (
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+    `client_id` bigint UNSIGNED NOT NULL,
+    `line_id` bigint UNSIGNED NOT NULL,
+    `month` date NOT NULL,
+    `total_calls_in` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_calls_out` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_duration_in_seconds` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_duration_out_seconds` bigint UNSIGNED NOT NULL DEFAULT 0,
+    `total_conferences` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_conference_minutes` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_messages` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_voicemails` int UNSIGNED NOT NULL DEFAULT 0,
+    `total_charge` decimal(15,4) NOT NULL DEFAULT 0,
+    `total_price` decimal(15,4) NOT NULL DEFAULT 0,
+    `active_days` int UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` timestamp NULL DEFAULT NULL,
+    `updated_at` timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `monthly_ucaas_unique` (`client_id`, `line_id`, `month`),
+    KEY `idx_client_month` (`client_id`, `month`),
+    FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
+    FOREIGN KEY (`line_id`) REFERENCES `lines` (`id`)
+) ENGINE=InnoDB;
+```
+
+**Colonne spécifique** : `active_days` — nombre de jours avec activité dans le mois, utile pour détecter les postes UCaaS inactifs (optimisation coûts licences Wazo).
+
+**Rétention** : 7 ans (cf. §8.3). Volume négligeable.
+
+#### 3.4 Ajouter `collaborator_id` manquant sur `sims`
 
 La table `sims` a `client_id` et `line_id` mais pas de lien direct vers `collaborators`. Le lien passe par `lines.collaborator_id`. Pas critique mais utile pour les requêtes directes.
 
@@ -932,10 +1066,158 @@ La table `sims` a `client_id` et `line_id` mais pas de lien direct vers `collabo
 |----------|--------|--------|--------|--------|
 | 🔴 P0 | Ajouter `client_id` sur `calls` + backfill | Performance CDR | 1 jour | Faible |
 | 🔴 P0 | Créer `daily_call_summaries` + job | Dashboards rapides | 2 jours | Faible |
-| 🔴 P1 | Archivage CDR > 12 mois | Taille table `calls` | 2 jours | Moyen |
+| 🔴 P0 | Créer `daily_iot_summaries` + job | Dashboards IoT | 1 jour | Faible |
+| 🔴 P0 | Créer `daily_ucaas_summaries` + job | Dashboards UCaaS | 1 jour | Faible |
+| 🔴 P1 | Archivage CDR > 12 mois (partitionnement) | Taille table `calls` | 2 jours | Moyen |
 | 🟠 P1 | Refonte `invoices` (sortie du JSON blob) | Performance facturation | 5-7 jours | Élevé (migration données) |
 | 🟠 P1 | Partitionnement `invoice_lines` par année | Performance requêtes (4M+ rows sur 5 ans) | Inclus dans refonte invoices | Moyen (dénormalisation `invoice_date`) |
 | 🟡 P2 | Suppression tables `_bkp` (après validation équipe) | Propreté | 0.5 jour | Faible |
 | 🟡 P2 | Finaliser migration tarification (déjà en cours) | Maintenabilité | À confirmer | Faible (migration pilotée) |
 | 🟡 P2 | Enrichir `monthly_summaries` (client_id, financier) | Reporting | 1 jour | Faible |
+| 🟡 P2 | Créer `monthly_iot_summaries` + job agrégation | Historique IoT long terme | 1 jour | Faible |
+| 🟡 P2 | Créer `monthly_ucaas_summaries` + job agrégation | Historique UCaaS long terme | 1 jour | Faible |
+| 🟡 P2 | Implémenter jobs de purge (daily > 18-24 mois, CDR archivage) | Conformité RGPD + performance | 1 jour | Faible |
 | 🟢 P3 | Refonte `devis` (sortie du JSON) | Cohérence | 2-3 jours | Moyen |
+
+---
+
+## 8. Politique de rétention des données
+
+### 8.1 Tables de summaries — structure complète
+
+La séparation des CDR en 3 tables distinctes (`calls`, `call_iots`, `call_ucass`) implique une symétrie identique pour les agrégations :
+
+| Domaine | CDR bruts | Daily (NOUVEAU V2) | Monthly |
+|---------|-----------|---------------------|---------|
+| **Mobile/Fixe/Internet** | `calls` | `daily_call_summaries` | `monthly_summaries` (existante, à enrichir §3.1) |
+| **IoT M2M** | `call_iots` | `daily_iot_summaries` | `monthly_iot_summaries` (NOUVEAU V2) |
+| **UCaaS/Wazo** | `call_ucass` | `daily_ucaas_summaries` | `monthly_ucaas_summaries` (NOUVEAU V2) |
+
+**Pourquoi des tables monthly séparées ?** Les métriques agrégées sont structurellement différentes :
+- **Mobile** : minutes voix, SMS, MMS, data Mo — structure de `monthly_summaries` existante
+- **IoT** : volume data (Mo/Go), nombre de sessions, quotas SIM, alertes dépassement
+- **UCaaS** : minutes VoIP, nombre de conférences, messages, postes actifs
+
+Forcer ces 3 profils dans une seule table `monthly_summaries` ajouterait des dizaines de colonnes nullable. La séparation est plus propre et cohérente avec la logique CDR.
+
+### 8.2 Chaîne de dépendance et recalculabilité
+
+```
+CDR bruts ──────► Daily summaries ──────► Monthly summaries
+(source)          (recalculable             (recalculable
+                   depuis CDR)               depuis daily)
+```
+
+- Les **daily** sont recalculables depuis les CDR bruts tant qu'ils existent
+- Les **monthly** sont recalculables depuis les daily
+- Une fois les CDR purgés, les daily deviennent la source de vérité
+- Une fois les daily purgés, les monthly deviennent la **seule trace historique**
+
+Cette chaîne dicte la politique de rétention : on conserve plus longtemps ce qui est en bout de chaîne.
+
+### 8.3 Durées de rétention par type de table
+
+#### CDR bruts (détail appel par appel)
+
+| Table | En ligne | Archive | Total | Justification |
+|-------|----------|---------|-------|---------------|
+| `calls` | **12 mois** | **+ 4 ans** (archive) | **5 ans** | Obligation légale télécom (L34-1 CPCE : 1 an facturation, 5 ans contentieux). Table déjà 12 Go — au-delà de 12 mois, archivage nécessaire |
+| `call_iots` | **6 mois** | **+ 2,5 ans** (archive) | **3 ans** | Volume potentiellement massif (millions/mois). Moins de contentieux IoT, mais audit quotas B2B nécessaire |
+| `call_ucass` | **12 mois** | **+ 2 ans** (archive) | **3 ans** | CDR VoIP — même valeur probante que mobile |
+
+#### Agrégations quotidiennes
+
+| Table | Rétention | Justification |
+|-------|-----------|---------------|
+| `daily_call_summaries` | **24 mois** | Dashboards, détection d'anomalies IA (doc 10), comparaison N vs N-1 |
+| `daily_iot_summaries` | **18 mois** | Idem, volume par ligne moins granulaire |
+| `daily_ucaas_summaries` | **18 mois** | Idem IoT |
+
+> **Note** : Au-delà de la rétention, les daily sont purgés car les monthly prennent le relais pour l'historique long.
+
+#### Agrégations mensuelles
+
+| Table | Rétention | Justification |
+|-------|-----------|---------------|
+| `monthly_summaries` | **Illimitée** (ou 10 ans) | Volume négligeable (1 ligne/mois/ligne télécom). Source unique pour l'IA optimisation forfait (doc 10 §1.2), rapports annuels, historique client |
+| `monthly_iot_summaries` | **7 ans** | Idem — quelques centaines de lignes/mois, coût de stockage quasi nul |
+| `monthly_ucaas_summaries` | **7 ans** | Idem |
+
+#### Factures
+
+| Table | Rétention | Justification |
+|-------|-----------|---------------|
+| `invoices_v2` + `invoice_lines` | **10 ans minimum** | Obligation comptable (Code de commerce L123-22). Aucune purge automatique |
+
+### 8.4 Stratégie technique d'archivage des CDR
+
+**Recommandation : Partitionnement MySQL par mois** (préféré à une table d'archive séparée)
+
+```sql
+-- Exemple pour calls — même logique applicable à call_iots et call_ucass
+ALTER TABLE calls PARTITION BY RANGE (YEAR(start_date) * 100 + MONTH(start_date)) (
+    PARTITION p202501 VALUES LESS THAN (202502),
+    PARTITION p202502 VALUES LESS THAN (202503),
+    PARTITION p202503 VALUES LESS THAN (202504),
+    -- ... partitions mensuelles
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+```
+
+**Avantages du partitionnement vs table d'archive :**
+
+| Critère | Partitionnement | Table archive séparée |
+|---------|-----------------|----------------------|
+| Transparence | Requêtes inchangées, MySQL optimise automatiquement | Nécessite UNION ou logique applicative |
+| Purge | `ALTER TABLE DROP PARTITION` = instantané | `DELETE` = lent + fragmentation |
+| Maintenance | Aucun job à maintenir | Job mensuel INSERT + DELETE |
+| Requêtes cross-période | Transparentes | Complexes (UNION ALL) |
+
+**Job de gestion des partitions** (à planifier mensuellement) :
+```sql
+-- 1. Créer la partition du mois suivant (à exécuter le 25 de chaque mois)
+ALTER TABLE calls REORGANIZE PARTITION p_future INTO (
+    PARTITION p202604 VALUES LESS THAN (202605),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- 2. Purger les partitions au-delà de la rétention (CDR > 5 ans)
+ALTER TABLE calls DROP PARTITION p202101;  -- instantané, pas de DELETE row-by-row
+```
+
+**Job de purge des daily summaries** (mensuel, le 1er de chaque mois) :
+```php
+// App\Jobs\PurgeStaleDailySummaries
+DB::table('daily_call_summaries')->where('date', '<', now()->subMonths(24))->delete();
+DB::table('daily_iot_summaries')->where('date', '<', now()->subMonths(18))->delete();
+DB::table('daily_ucaas_summaries')->where('date', '<', now()->subMonths(18))->delete();
+```
+
+### 8.5 Schéma visuel de rétention
+
+```
+                        │ En ligne       │ Archive / froid   │ Purgé
+────────────────────────┼────────────────┼───────────────────┼──────
+CDR calls               │◄── 12 mois ──►│◄──── + 4 ans ────►│ purge
+CDR call_iots           │◄── 6 mois  ──►│◄──── + 2,5 ans ──►│ purge
+CDR call_ucass          │◄── 12 mois ──►│◄──── + 2 ans ────►│ purge
+                        │                │                    │
+Daily call summaries    │◄──── 24 mois ────────────────────►│ purge
+Daily IoT/UCaaS summ.   │◄──── 18 mois ────────────────────►│ purge
+                        │                │                    │
+Monthly summaries       │◄──────────── illimité / 7-10 ans ─────────►│
+                        │  (coût négligeable)                │
+                        │                │                    │
+Invoices                │◄──────────── 10 ans minimum (loi) ────────►│
+```
+
+### 8.6 Références légales
+
+| Texte | Obligation | Tables concernées |
+|-------|-----------|-------------------|
+| **L34-1 CPCE** (Code des postes et communications électroniques) | Conservation des données de trafic 1 an pour facturation | `calls`, `call_iots`, `call_ucass` |
+| **L34-1-1 CPCE** | Conservation jusqu'à 5 ans sur réquisition judiciaire | CDR archivés |
+| **Code de commerce L123-22** | Conservation pièces comptables 10 ans | `invoices_v2`, `invoice_lines` |
+| **RGPD Art. 5(1)(e)** | Limitation de la conservation au strict nécessaire | Justifie la purge des daily et CDR bruts |
+
+> **Note RGPD** : Les CDR contiennent des données personnelles (numéros appelés). La purge automatique après la durée légale n'est pas seulement une optimisation technique — c'est une **obligation réglementaire**.
