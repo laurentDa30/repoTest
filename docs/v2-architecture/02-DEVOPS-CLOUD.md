@@ -17,7 +17,6 @@
 | Crash serveur = downtime total | Moyenne | **CRITIQUE** — perte de service pour 380 clients |
 | Perte de données (pas de backup off-site documenté) | Faible | **CRITIQUE** |
 | Déploiement cassé sans rollback | Élevée | Élevé |
-| Incohérence entre env de dev et prod | Certaine | Moyen |
 | Pas de scaling possible | Certaine | Élevé (objectif de doubler le parc) |
 
 ## 2. Infrastructure cible
