@@ -696,10 +696,10 @@ $tenant->domains()->create(['domain' => 'reunion.cekoya.fr']);
 
 > **Priorisation** (alignée sur la roadmap condensée du doc 00) :
 > - **Phase 0 (en cours)** : Montées de version (Laravel 10→11→14, Livewire 2→4, Pusher→Reverb, PHP ≥ 8.3), passage imports toModel→toCollection
-> - **Phase 1 (en cours)** : Quick wins CDR (`client_id` + agrégation), tables `call_iots` + `call_ucass`, jobs d'agrégation, suppression index inutiles
-> - **Phase 2** : API REST (liaisons clients uniquement), Redis, modularisation DDD-lite, refonte facturation, stancl/tenancy, CI/CD
-> - **Phase 3** : Sync catalogue + SSO, portails client/amba Livewire 4, provisioning régions
-> - **Phase 4 (ultérieure)** : Docker, migration cloud Scaleway, monitoring, scaling
+> - **Phase 1 (en cours / à suivre)** : CDR (`client_id`, `call_iots`, `call_ucass`, agrégations, index) + refonte facturation (`invoices_v2` + `invoice_lines`, dual-write, PDF async) + nettoyage BDD (`_bkp`, `pricing_zones`, orphelins)
+> - **Phase 2** : Redis, Horizon, worker séparé, audit trail, CI/CD, API REST (liaisons clients), gateways fournisseurs, Scout, modularisation DDD-lite, contrats `Billable` et `CollaboratorContract`
+> - **Phase 3** : stancl/tenancy, sync catalogue + SSO, portails client/amba/Hub Livewire 4, provisioning régions, sécurité (KMS, RGPD rétention, tests anti-fuite)
+> - **Phase 4 (ultérieure)** : Docker, migration cloud Scaleway, monitoring, backups par tenant, archivage CDR, IA (anomalies, optimisation forfaits, scoring, churn, assistant), scaling
 
 ---
 

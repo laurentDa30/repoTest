@@ -54,69 +54,154 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ## Roadmap condensée
 
+> Construite à partir de l'analyse croisée des documents 01 à 17. Chaque étape référence le document source.
+
 ### Phase 0 — Montées de version et fondations (en cours)
 
 Objectif : stabiliser la stack technique avant toute évolution fonctionnelle.
 
-| Étape | Détail | Statut |
-|-------|--------|--------|
-| **0.1** | Laravel 10 → 11 | **En cours** |
-| **0.2** | Livewire 2 → 4 | **En cours** |
-| **0.3** | Pusher → Laravel Reverb | **Prêt pour production** (validation serveur requise) |
-| **0.4** | Passage imports toModel → toCollection | **En cours** |
-| **0.5** | Laravel 11 → 12 → **14** + PHP ≥ 8.3 | À planifier |
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **0.1** | Laravel 10 → 11 | `15-GUIDE-MONTEE-VERSION` | **En cours** |
+| **0.2** | Livewire 2 → 4 (migration syntaxe : `@livewire` → `<livewire:>`, `emit` → `dispatch`, `wire:model` deferred par défaut) | `15-GUIDE-MONTEE-VERSION`, `04-FRONTEND` | **En cours** |
+| **0.3** | Pusher → Laravel Reverb | `04-FRONTEND` §4 | **Prêt pour production** (validation serveur requise) |
+| **0.4** | Passage imports toModel → toCollection (traitement plus rapide) | — | **En cours** |
+| **0.5** | Mise à jour packages dépendants (Spatie, Horizon, etc.) | `15-GUIDE-MONTEE-VERSION` | À vérifier |
+| **0.6** | Laravel 11 → 12 → **14** + PHP ≥ 8.3 | `15-GUIDE-MONTEE-VERSION` | À planifier |
 
-> **Point de vigilance Phase 0.5** : La montée vers Laravel 14 nécessite PHP ≥ 8.3. Cela implique potentiellement la mise à jour du serveur, de l'OS, des extensions PHP, et la vérification de compatibilité de tous les packages Composer. Risque modéré à élevé — à valider sur un environnement de test avant production. L'intérêt principal est l'accès aux **fonctionnalités IA natives** de Laravel 14.
+> **Point de vigilance Phase 0.6** : La montée vers Laravel 14 nécessite PHP ≥ 8.3. Cela implique potentiellement la mise à jour du serveur, de l'OS, des extensions PHP, et la vérification de compatibilité de tous les packages Composer. Risque modéré à élevé — à valider sur un environnement de test avant production. L'intérêt principal est l'accès aux **fonctionnalités IA natives** de Laravel 14.
 
-### Phase 1 — Évolutions base de données et CDR
+### Phase 1 — Évolutions base de données, CDR et facturation
 
-Objectif : résoudre les problèmes de performance et structurer les données pour le multi-type.
+Objectif : résoudre les problèmes de performance critiques, structurer les données pour le multi-type, et préparer la refonte facturation.
 
-| Étape | Détail | Statut |
-|-------|--------|--------|
-| **1.1** | Ajout `client_id` dans `calls` + `monthly_summaries` | **En cours** |
-| **1.2** | Création table `call_iots` (CDR IoT séparés) | **En cours** |
-| **1.3** | Création table `call_ucass` (CDR UCaaS séparés) | **En cours** |
-| **1.4** | Tables d'agrégation journalière (IoT + calls) | **En cours** |
-| **1.5** | Jobs de récupération et traitement pour agrégations | **En cours** |
-| **1.6** | Suppression d'index inutiles sur `calls` (après tests) | **En cours** |
-| **1.7** | Enrichir `monthly_summaries` (colonnes financières) | À faire |
+#### 1A — CDR et tables de consommation (en cours)
 
-### Phase 2 — API, modularisation et facturation
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **1.1** | Ajout `client_id` dans `calls` + backfill via JOIN `lines` + index composite `(client_id, date)` | `01-ARCHITECTE` §3, `08-ANALYSE-BDD` | **En cours** |
+| **1.2** | Ajout `client_id` dans `monthly_summaries` + index `(client_id, month)` | `01-ARCHITECTE` §3 | **En cours** |
+| **1.3** | Création table `call_iots` (CDR IoT séparés — volume massif M2M) | `01-ARCHITECTE` §2 séparation CDR | **En cours** |
+| **1.4** | Création table `call_ucass` (CDR UCaaS/Wazo séparés) | `01-ARCHITECTE` §2 séparation CDR | **En cours** |
+| **1.5** | Tables d'agrégation journalière : `daily_call_summaries` + `daily_iot_summaries` + `daily_ucaas_summaries` | `01-ARCHITECTE` §3, `03-BACKEND` | **En cours** |
+| **1.6** | Jobs de récupération et traitement pour agrégations (nuit + post-import) | `03-BACKEND` §imports | **En cours** |
+| **1.7** | Suppression d'index inutiles sur `calls` (après tests de performance) | — | **En cours** |
+| **1.8** | Enrichir `monthly_summaries` : colonnes `total_charge`, `total_price`, émissions carbone | `01-ARCHITECTE` §3, `08-ANALYSE-BDD` | À faire |
 
-Objectif : structurer le code, découpler les portails, refondre la facturation.
+#### 1B — Facturation (refonte `invoices`)
 
-| Étape | Détail | Statut |
-|-------|--------|--------|
-| **2.1** | API interne REST `/api/v1/*` — **uniquement pour les liaisons clients** (espace client, intégrations partenaires, future app mobile). L'architecture Hub & régions reste classique (Livewire, pas d'API entre eux) | À faire |
-| **2.2** | Redis (cache, sessions, queues) | À faire |
-| **2.3** | Modularisation DDD-lite (module par module, Strangler Fig) | À faire |
-| **2.4** | Refonte facturation (sortie JSON blob → `invoices_v2` + `invoice_lines`) | À faire |
-| **2.5** | Install stancl/tenancy + BDD centrale + premier tenant (Réunion = V1) | À faire |
-| **2.6** | CI/CD GitLab CI (tests, build, déploiement) | À faire |
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **1.9** | Créer tables `invoices_v2` (en-tête normalisé) + `invoice_lines` (lignes détaillées) — **à côté** de `invoices` existante | `17-REFONTE-FACTURATION`, `08-ANALYSE-BDD` | À faire |
+| **1.10** | Script de migration historique : parsing JSON `doc` → insertion dans `invoices_v2` + `invoice_lines` avec vérification checksum (divergence ≤ ±0.01€) | `17-REFONTE-FACTURATION` | À faire |
+| **1.11** | Mode dual-write : nouveau code écrit dans les deux systèmes, lit depuis `invoices_v2`. Comparaison automatique à chaque génération | `14-STRATEGIE-TRANSITION` | À faire |
+| **1.12** | Génération PDF asynchrone via Queue → stockage S3 (`/invoices/{year}/{month}/{id}.pdf`) | `17-REFONTE-FACTURATION`, `03-BACKEND` | À faire |
 
-### Phase 3 — Multi-région et portails
+> **Garde-fous facturation** (doc `17-REFONTE-FACTURATION`) :
+> - Arrondi **par ligne** (convention comptable française)
+> - Immutabilité : `is_locked = 1` → aucune modification (contrainte applicative + BDD)
+> - Traçabilité : chaque `invoice_line` liée à sa source (CDR, forfait, matériel)
+> - Avoir plutôt que modification : erreur sur facture verrouillée → note de crédit
 
-Objectif : déployer le modèle franchise multi-région et moderniser les portails.
+#### 1C — Nettoyage BDD
 
-| Étape | Détail | Statut |
-|-------|--------|--------|
-| **3.1** | Sync catalogue + SSO entre Hub et régions | À faire |
-| **3.2** | Portails client/ambassadeur Livewire 4 | À faire |
-| **3.3** | Provisioning automatique de nouvelles régions | À faire |
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **1.13** | Finaliser migration tarification `pricing_zones` → `plan_rates` (normalisé), supprimer tables `_bkp` une fois confirmé stable | `08-ANALYSE-BDD` | À faire |
+| **1.14** | Nettoyage données orphelines (devices sans client, lignes sans client) | `08-ANALYSE-BDD` | À faire |
 
-### Phase 4 — Infrastructure et scaling (ultérieure)
+### Phase 2 — Structuration applicative
 
-Objectif : conteneurisation, migration cloud, scaling.
+Objectif : structurer le code, mettre en place les outils transverses, isoler les intégrations.
 
-| Étape | Détail | Statut |
-|-------|--------|--------|
-| **4.1** | Docker + Docker Compose (dev puis staging/prod) | À faire |
-| **4.2** | Migration cloud Scaleway | À faire |
-| **4.3** | Monitoring (Laravel Pulse, Sentry, Grafana) | À faire |
-| **4.4** | Nouvelles régions, scaling infra (1 serveur/région si besoin) | Continu |
+#### 2A — Outillage et infrastructure applicative
 
-> **Note** : La conteneurisation Docker et la migration cloud ne sont pas prioritaires à ce stade. Elles seront abordées quand les fondations applicatives (versions, BDD, modularisation) seront stabilisées.
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **2.1** | Redis (cache, sessions, queues) — remplacement sessions fichier | `03-BACKEND` §cache, `02-DEVOPS` | À faire |
+| **2.2** | Laravel Horizon (monitoring queues, supervisors séparés : `default`, `imports`, `billing`) | `03-BACKEND` §queues, `02-DEVOPS` §worker | À faire |
+| **2.3** | Worker séparé via Supervisord (voir détail doc `02-DEVOPS` §2) | `02-DEVOPS` §worker séparé | À faire |
+| **2.4** | Audit trail — `spatie/laravel-activitylog` sur modèles sensibles (obligation RGPD télécom/finance) | `06-CYBERSECURITE` §5, `01-ARCHITECTE` | À faire |
+| **2.5** | CI/CD GitLab CI (Pint → PHPStan → tests Pest → build → deploy staging auto, prod manuelle) | `02-DEVOPS` §4 | À faire |
+
+#### 2B — API et intégrations
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **2.6** | API REST `/api/v1/*` — **uniquement liaisons clients** (espace client, intégrations partenaires, future app mobile). Hub & régions restent en architecture classique Livewire | `01-ARCHITECTE` §API, `04-FRONTEND` §6 | À faire |
+| **2.7** | Pattern Gateway fournisseurs : `TransatelGateway`, `UnycGateway`, `WazoGateway`, etc. derrière interfaces (`MobileProviderGateway`, `UCaaSProviderGateway`) — isolation des connecteurs | `03-BACKEND` §intégrations, `01-ARCHITECTE` §7.4 | À faire |
+| **2.8** | Laravel Scout + database driver (recherche clients, lignes, catalogue — scopé par tenant) | `01-ARCHITECTE` §revue, `03-BACKEND` | À faire |
+
+#### 2C — Modularisation
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **2.9** | Modularisation DDD-lite progressive (Strangler Fig) — module par module : `Client`, `Telecom`, `IoT`, `UCaaS`, `Billing`, `CDR`, `Catalog`, `Stock`, `Integration`, `Ticket`, `Order`, `Ambassador`, `Environment`, `Content`, `Auth`, `Finance`, `IA` | `01-ARCHITECTE` §2, `12-CONVENTIONS-CODE` | À faire |
+| **2.10** | Contrat `Billable` inter-modules (facturation unifiée : chaque module facturable implémente l'interface) | `01-ARCHITECTE` §Billable | À faire |
+| **2.11** | Contrat `CollaboratorContract` (collaborateur = centre de coût client, pivot entre Telecom/Stock/Infogérance) | `01-ARCHITECTE` §collaborateur | À faire |
+
+### Phase 3 — Multi-région, portails et sécurité
+
+Objectif : déployer le modèle franchise multi-région, moderniser les portails, sécuriser.
+
+#### 3A — Multi-tenancy et régions
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **3.1** | Install stancl/tenancy v3 + BDD centrale + V1 = premier tenant (Réunion, zéro migration visible) | `01-ARCHITECTE` §2, `09-MULTI-REGION` | À faire |
+| **3.2** | Sync catalogue Hub → régions (event `PlanUpdated` → job `SyncCatalogToTenants` via queue dédiée `tenant-sync`, checksums) | `09-MULTI-REGION` §sync | À faire |
+| **3.3** | SSO inter-régions (Hub ↔ admin régional) | `09-MULTI-REGION` §SSO | À faire |
+| **3.4** | Provisioning automatique de nouvelles régions (commande artisan + UI Hub) | `09-MULTI-REGION` §provisioning | À faire |
+
+#### 3B — Portails
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **3.5** | Portail client Livewire 4 (dashboard conso, factures, lignes, tickets — scopé tenant) | `04-FRONTEND` §2-3 | À faire |
+| **3.6** | Portail ambassadeur Livewire 4 (pipeline prospects, commissions, support) | `04-FRONTEND` §2 | À faire |
+| **3.7** | Dashboard Hub central (stats multi-régions, gestion catalogue, provisioning UI, santé système) | `09-MULTI-REGION`, `01-ARCHITECTE` §Central | À faire |
+
+#### 3C — Sécurité et conformité
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **3.8** | Middleware sécurité par portail (CSP headers distincts, rate limiting Redis, Sanctum token scoping pour API) | `06-CYBERSECURITE` §2-4 | À faire |
+| **3.9** | Chiffrement données sensibles (IBAN, données personnelles) — migration vers KMS (Scaleway KMS ou Vault) | `06-CYBERSECURITE` §1 | À faire |
+| **3.10** | Politique de rétention CDR (RGPD : durée légale, purge automatique, anonymisation agrégations au-delà de la période) | `06-CYBERSECURITE` §3, `01-ARCHITECTE` §archivage | À faire |
+| **3.11** | Tests anti-fuite cross-tenant (vérification isolation BDD stancl/tenancy) | `06-CYBERSECURITE` §6 | À faire |
+
+### Phase 4 — Infrastructure, IA et scaling (ultérieure)
+
+Objectif : conteneurisation, migration cloud, fonctionnalités IA, scaling.
+
+#### 4A — Infrastructure
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **4.1** | Docker + Docker Compose (dev puis staging/prod) | `02-DEVOPS` §3 | À faire |
+| **4.2** | Migration cloud Scaleway (staging puis production, blue-green deploy) | `02-DEVOPS` §2 | À faire |
+| **4.3** | Monitoring : Laravel Pulse (métriques), Sentry (erreurs), Grafana (infra) | `02-DEVOPS` §revue §4 | À faire |
+| **4.4** | Backup automatisé par tenant (snapshot + mysqldump → S3, vérification post-backup) | `02-DEVOPS` §5 | À faire |
+| **4.5** | Archivage CDR automatisé (0-12 mois : en ligne, 12-36 mois : export S3, >36 mois : agrégations seules) | `01-ARCHITECTE` §archivage | À faire |
+
+#### 4B — Fonctionnalités IA
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **4.6** | Détection d'anomalies CDR (consommations inhabituelles, fraude) — basé sur `daily_call_summaries` | `10-FONCTIONNALITES-IA` | À faire |
+| **4.7** | Optimisation de forfaits (suggestion de plan adapté sur base de 6+ mois d'historique) | `10-FONCTIONNALITES-IA` | À faire |
+| **4.8** | Scoring prospect (priorisation commerciale) | `10-FONCTIONNALITES-IA` | À faire |
+| **4.9** | Prédiction de churn (12+ mois d'historique requis) | `10-FONCTIONNALITES-IA` | À faire |
+| **4.10** | Assistant admin IA (function calling sur API interne) | `10-FONCTIONNALITES-IA` | À faire |
+
+#### 4C — Scaling
+
+| Étape | Détail | Source | Statut |
+|-------|--------|--------|--------|
+| **4.11** | Scaling Phase B : serveur dédié par région si >5 régions ou >1000 clients/région (~+50-80€/mois/région) | `02-DEVOPS` §2, `09-MULTI-REGION` §9 | À faire |
+| **4.12** | Nouvelles régions (Métropole, Mayotte, etc.) | `09-MULTI-REGION` | Continu |
+
+> **Note** : La conteneurisation Docker et la migration cloud ne sont pas prioritaires à ce stade. Elles seront abordées quand les fondations applicatives (versions, BDD, modularisation) seront stabilisées. Les fonctionnalités IA nécessitent que les tables d'agrégation soient en place et alimentées (Phase 1 complète).
 
 ---
 
