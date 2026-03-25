@@ -44,10 +44,10 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 | Search | Laravel Scout + database driver | Recherche catalogue, clients, lignes (zéro service tiers) |
 | Temps réel | Laravel Reverb (remplacement Pusher) | Natif Laravel, zéro coût tiers |
 | Signature | Yousign (existant) | Maintien |
-| Stockage fichiers | S3-compatible (Scaleway Object Storage) | Factures PDF, documents, exports |
+| Stockage fichiers | Sur le serveur Factures PDF, documents, exports | Sécurisation S3-compatible (Scaleway Object Storage) |
 | Monitoring | Laravel Pulse + Sentry + Grafana | Observabilité complète |
 | CI/CD | GitLab CI | Déjà sur GitLab |
-| Conteneurisation | Docker + Docker Compose | Reproductibilité, pré-requis cloud |
+| Conteneurisation | Docker + Docker Compose | Reproductibilité, pré-requis cloud (à réfléchir) |
 | Hébergement | Scaleway (Paris) | Souveraineté FR, RGPD, coût maîtrisé |
 
 ## Roadmap condensée
