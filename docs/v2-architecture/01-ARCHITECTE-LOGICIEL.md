@@ -21,9 +21,9 @@
 | **Pas de CI/CD** | Pas de filet de sécurité, tests manuels | MOYEN |
 | **Hébergement local** | SPOF, pas de scaling, pas de redondance | ÉLEVÉ |
 | **Pas de cache applicatif** | Requêtes BDD répétées inutilement | MOYEN |
-| **Laravel 10 / Livewire 2** | Versions en fin de support, dette qui s'accumule | MOYEN |
+| **Laravel 10 / Livewire 2** | Versions en fin de support, dette qui s'accumule — **montée vers Laravel 11 + Livewire 4 en cours** | MOYEN |
 
-## 2. Architecture cible : Monolithe Modulaire DDD-lite + Multi-région
+## 2. Architecture cible : Monolithe Modulaire DDD-lite + Multi-région (Laravel 14)
 
 ### Pourquoi PAS de microservices
 
@@ -452,16 +452,27 @@ Règles complémentaires :
 3. **La logique métier vit dans Domain/** — les entités savent se valider, calculer leurs états, vérifier leurs invariants
 4. **L'infrastructure est interchangeable** — le jour où on change de driver (ex: Scout database → Meilisearch), seul `Infrastructure/` est impacté
 
-### Pattern API-first
+### Pattern API — Périmètre clarifié
+
+L'API REST `/api/v1/*` n'est **pas** utilisée pour l'architecture interne Hub ↔ régions. Elle est dédiée aux **interactions externes** :
+
+| Consommateur de l'API | Usage |
+|----------------------|-------|
+| **Portail client** (espace client) | Consultation consos, factures, lignes, tickets |
+| **Intégrations partenaires** | Fournisseurs, connecteurs tiers |
+| **Future app mobile** | Accès client mobile |
+
+Le **Hub central** et les **portails admin régionaux** restent en **architecture classique Livewire** (rendu serveur, pas d'API REST entre eux). La synchronisation Hub ↔ régions passe par des mécanismes internes (sync BDD via stancl/tenancy, events Laravel).
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   Laravel 12                         │
+│                   Laravel 14                         │
 │                                                      │
 │  ┌──────────────────────┐  ┌──────────────────┐    │
 │  │     Livewire 4       │  │   API REST       │    │
-│  │ (Admin + Client +    │  │   /api/v1/*      │    │
-│  │  Ambassadeur)        │  │   (mobile, etc.) │    │
+│  │ Hub + Admin régional │  │   /api/v1/*      │    │
+│  │ + Client + Ambassa.  │  │ (clients, mobile │    │
+│  │ (archi classique)    │  │  partenaires)    │    │
 │  └──────────┬───────────┘  └────────┬─────────┘    │
 │             │                       │               │
 │             ▼                       ▼               │
@@ -675,7 +686,7 @@ $tenant->domains()->create(['domain' => 'reunion.cekoya.fr']);
 ## 7. Points d'attention long terme
 
 1. **Ne jamais coupler les modules** — c'est le premier réflexe sous pression et c'est ce qui a mené à la V1 actuelle
-2. **L'API interne est l'investissement le plus structurant** — elle permet de découpler les portails et prépare une future app mobile
+2. **L'API REST est dédiée aux liaisons clients et intégrations externes** — elle sert l'espace client (portail client), les intégrations partenaires et prépare une future app mobile. **Le Hub central et les régions restent en architecture classique** (Livewire, rendu serveur, pas d'API entre eux). L'API n'est pas utilisée pour la communication Hub ↔ régions qui passe par des mécanismes internes (sync BDD, events)
 3. **Le partitionnement CDR doit être automatisé** — création automatique des partitions mensuelles futures via un job planifié
 4. **Prévoir un module Integration dédié** — les connecteurs fournisseurs doivent être isolés derrière des interfaces pour pouvoir ajouter/remplacer un fournisseur sans impacter le métier
 5. **L'architecture multi-région doit être pensée dès le début** — les données de référence (catalogue, tarifs) sont centrales ; les données opérationnelles (clients, CDR, factures) sont régionales. Tout le code métier doit être agnostique de la région courante (le switch de BDD est transparent via stancl/tenancy)
@@ -683,10 +694,12 @@ $tenant->domains()->create(['domain' => 'reunion.cekoya.fr']);
 
 ---
 
-> **Priorisation** :
-> - Court terme (0-3 mois) : Docker services (Postgres, Redis, Mailpit), CI/CD, quick wins CDR (`client_id` + agrégation), Laravel 12, **install stancl/tenancy + BDD centrale + premier tenant (Réunion = V1)**
-> - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 4, **sync catalogue + SSO**
-> - Long terme (6-12 mois) : Portails client/amba Livewire 4, migration cloud, **provisioning auto de régions**, scaling
+> **Priorisation** (alignée sur la roadmap condensée du doc 00) :
+> - **Phase 0 (en cours)** : Montées de version (Laravel 10→11→14, Livewire 2→4, Pusher→Reverb, PHP ≥ 8.3), passage imports toModel→toCollection
+> - **Phase 1 (en cours)** : Quick wins CDR (`client_id` + agrégation), tables `call_iots` + `call_ucass`, jobs d'agrégation, suppression index inutiles
+> - **Phase 2** : API REST (liaisons clients uniquement), Redis, modularisation DDD-lite, refonte facturation, stancl/tenancy, CI/CD
+> - **Phase 3** : Sync catalogue + SSO, portails client/amba Livewire 4, provisioning régions
+> - **Phase 4 (ultérieure)** : Docker, migration cloud Scaleway, monitoring, scaling
 
 ---
 

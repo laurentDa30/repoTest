@@ -16,7 +16,7 @@
 | **Bootstrap** | Framework mature, déjà en place — **conservé en V2** (migration vers Tailwind = coût disproportionné pour 2 devs) |
 | **Livewire 2** | Productif mais la v2 a des limitations (pas de lazy loading natif, pas de `$wire`, performance limitée sur les listes longues) |
 | **Pusher** | Service tiers payant — Laravel Reverb le remplace gratuitement |
-| **Chart.js** | Correct pour les besoins actuels — **conservé en V2** (licence MIT, gratuit, Chart.js v4 couvre line/bar/pie/doughnut) |
+| **Chart.js** | Correct pour les besoins actuels — **conservé en V2, pas de passage à ApexCharts** (licence MIT, gratuit, Chart.js v4 couvre line/bar/pie/doughnut) |
 | **Pas de design system** | Vraisemblablement des incohérences visuelles entre les 3 portails |
 
 ### Points de douleur frontend probables
@@ -120,13 +120,16 @@
 - Nettoyer les overrides CSS orphelins lors des refactos de vues
 - Utiliser les composants Bootstrap 5 natifs (accordions, offcanvas, toasts) au lieu de solutions custom
 
-### Chart.js conservé en V2
+### Chart.js conservé en V2 — Pas de passage à ApexCharts
+
+**Décision définitive** : Chart.js est conservé. Le passage à ApexCharts initialement envisagé est abandonné.
 
 **Justification** :
 - **Licence MIT** — gratuit sans restriction, aucun risque de licence future
-- **Déjà en place** en V1 — pas de migration à faire
+- **Déjà en place** en V1 — pas de migration à faire, zéro coût de transition
 - **Chart.js v4** couvre les besoins : line, bar, pie, doughnut, radar, scatter
 - **ApexCharts a changé son modèle de licence** (v5+) : gratuit uniquement pour les organisations < 2M$ CA/an. Pour Cekoya (380+ clients B2B telecom), une licence commerciale serait probablement nécessaire
+- **Priorité aux évolutions métier** — le temps non dépensé sur une migration de librairie graphique est mieux investi sur les fonctionnalités
 
 | Critère | Chart.js v4 | ApexCharts v5 |
 |---------|-------------|---------------|
@@ -135,6 +138,9 @@
 | Types de charts | Line, bar, pie, doughnut, radar, scatter, bubble | Plus riche (treemap, heatmap, candlestick...) |
 | Bundle size | ~60 Ko (min+gzip) | ~125 Ko (min+gzip) |
 | Déjà en V1 | ✅ Oui | Non |
+| **Décision** | **✅ Conservé** | **❌ Écarté** |
+
+> Si des besoins avancés (heatmaps, treemaps) se présentent à l'avenir, ils seront évalués au cas par cas via des plugins Chart.js ou une librairie complémentaire ciblée — pas un remplacement global.
 
 ### Bibliothèque de composants (100% Blade/Livewire)
 
@@ -277,7 +283,7 @@ Si des composants JS complexes sans CDN sont nécessaires (éditeur rich-text cu
 ### Optimisations
 
 1. **Livewire 4 lazy loading + Islands** : les composants lourds (graphiques, tables longues) chargés à la demande, Islands pour re-render indépendant
-2. **Vite** pour le bundling (déjà par défaut Laravel 12) — remplacement de Mix si encore utilisé
+2. **Vite** pour le bundling (déjà par défaut Laravel 11+) — remplacement de Mix si encore utilisé
 3. **Images optimisées** : WebP, lazy loading natif
 4. **Pagination côté serveur** : jamais charger des milliers de lignes côté client
 5. **`wire:navigate`** : navigation SPA-like native Livewire 4, préchargement au survol des liens
@@ -297,7 +303,7 @@ Si des composants JS complexes sans CDN sont nécessaires (éditeur rich-text cu
 | Risque | Mitigation |
 |--------|------------|
 | Bootstrap 5 non mis à jour | Suivre les releases Bootstrap 5.x, mettre à jour le CDN régulièrement |
-| Chart.js limité pour dashboards très complexes (heatmaps, treemaps) | Suffisant pour les besoins actuels. Réévaluer si besoin futur — Chart.js plugins ou alternative évaluée au cas par cas |
+| Chart.js limité pour dashboards très complexes (heatmaps, treemaps) | Suffisant pour les besoins actuels et prévisibles. Si besoin futur ponctuel → plugins Chart.js ou librairie complémentaire ciblée, **pas de remplacement global par ApexCharts** |
 | Livewire 4 moins performant que SPA pour interactions très complexes | `wire:navigate` + Islands + Alpine.js comblent l'écart, l'API REST reste dispo pour futur besoin SPA |
 | Composants Livewire trop lourds (N+1 queries) | Optimisation backend (eager loading, agrégation), `$this->authorize()` par composant |
 
@@ -309,7 +315,7 @@ Si des composants JS complexes sans CDN sont nécessaires (éditeur rich-text cu
 - La stack unifiée **tout Livewire 4 + Bootstrap + Chart.js** est le choix le plus pragmatique pour 2 devs backend-first
 - Laravel Reverb comme remplacement de Pusher est le bon choix — natif, gratuit, maintenu par Laravel
 - **Bootstrap conservé** — migration vers Tailwind = coût disproportionné pour l'équipe
-- **Chart.js conservé** — licence MIT gratuite, déjà en place, ApexCharts v5 a un risque de licence payante (CA > 2M$)
+- **Chart.js conservé définitivement** — licence MIT gratuite, déjà en place, pas de passage à ApexCharts (risque de licence payante CA > 2M$)
 - **Zéro duplication de composants** : un seul jeu de composants Blade partagé par tous les portails
 
 ## Points d'attention
