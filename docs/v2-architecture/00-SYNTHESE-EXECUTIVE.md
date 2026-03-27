@@ -27,7 +27,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ## Architecture cible
 
-**Monolithe modulaire Laravel 14 + API-first + Multi-région Hub & Spoke**
+**Monolithe modulaire Laravel 13 + API-first + Multi-région Hub & Spoke**
 
 > Chaque agence régionale dispose de sa propre application et BDD isolée (modèle franchise). Un Hub central gère le catalogue partagé, le monitoring et l'accès cross-régions via SSO.
 
@@ -35,8 +35,8 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 | Couche | Technologie | Justification |
 |--------|------------|---------------|
-| Backend | **Laravel 14** (cible) — via montée progressive 10 → 11 → 12 → 14 | Continuité de compétences, écosystème riche, **fonctionnalités IA natives** |
-| PHP | **PHP ≥ 8.3** (requis par Laravel 14) | Pré-requis Laravel 14, typed class constants, `#[Override]`, performance JIT |
+| Backend | **Laravel 13** (cible) — via montée progressive 10 → 11 → 12 → 13 | Continuité de compétences, écosystème riche, **fonctionnalités IA natives si non utilisation du shark** sinon V12 max |
+| PHP | **PHP ≥ 8.3** (requis par Laravel 13) | Pré-requis Laravel 13, typed class constants, `#[Override]`, performance JIT |
 | Multi-tenant | stancl/tenancy v3 (database-per-tenant) | Isolation BDD par région, codebase unique |
 | Frontend (tous portails) | Livewire 4 + Alpine.js | Stack unifiée, productivité maximale pour 2 devs backend-first |
 | Graphiques | **Chart.js v4** (conservé) | Licence MIT gratuite, déjà en V1, pas de passage à ApexCharts |
