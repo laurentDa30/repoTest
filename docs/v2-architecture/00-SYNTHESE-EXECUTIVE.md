@@ -67,9 +67,9 @@ Objectif : stabiliser la stack technique avant toute évolution fonctionnelle.
 | **0.3** | Pusher → Laravel Reverb | `04-FRONTEND` §4 | **Prêt pour production** (validation serveur requise) |
 | **0.4** | Passage imports toModel → toCollection (traitement plus rapide) | — | **En cours** |
 | **0.5** | Mise à jour packages dépendants (Spatie, Horizon, etc.) | `15-GUIDE-MONTEE-VERSION` | À vérifier |
-| **0.6** | Laravel 11 → 12 → **14** + PHP ≥ 8.3 | `15-GUIDE-MONTEE-VERSION` | À planifier |
+| **0.6** | Laravel 11 → 12 → **13** + PHP ≥ 8.3 | `15-GUIDE-MONTEE-VERSION` | À planifier |
 
-> **Point de vigilance Phase 0.6** : La montée vers Laravel 14 nécessite PHP ≥ 8.3. Cela implique potentiellement la mise à jour du serveur, de l'OS, des extensions PHP, et la vérification de compatibilité de tous les packages Composer. Risque modéré à élevé — à valider sur un environnement de test avant production. L'intérêt principal est l'accès aux **fonctionnalités IA natives** de Laravel 14.
+> **Point de vigilance Phase 0.6** : La montée vers Laravel 14 nécessite PHP ≥ 8.3. Cela implique potentiellement la mise à jour du serveur, de l'OS, des extensions PHP, et la vérification de compatibilité de tous les packages Composer. Risque modéré à élevé — à valider sur un environnement de test avant production. L'intérêt principal est l'accès aux **fonctionnalités IA natives** de Laravel 13.
 
 ### Phase 1 — Évolutions base de données, CDR et facturation
 
