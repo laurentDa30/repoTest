@@ -582,317 +582,128 @@ CREATE TABLE `daily_ucaas_summaries` (
 
 **Rétention** : 18 mois (cf. §8.3).
 
-#### 1.3 Partitionner `calls`
+#### 1.3 Partitionner `calls` et séparer IoT/UCaaS
+
+> **Guide complet → [doc 19 — Guide de migration `calls`](./19-GUIDE-MIGRATION-CALLS.md)**
+
+**Situation réelle** :
+
+| Table | Rows | Taille | Période |
+|-------|------|--------|---------|
+| `calls` | ~19M (IoT + mobile mélangés) | ~8.5 Go | 12 mois glissants |
+| `calls_archive` | ~9M | ~5 Go | Mois antérieurs |
+
+**Décision clé — "Couper au présent"** : on ne migre pas les CDR IoT/UCaaS historiques hors de `calls`. Les données existantes restent en place. Les nouveaux CDR IoT/UCaaS vont dans `call_iots` / `call_ucass` à partir de la date de bascule. Les anciens IoT/UCaaS dans `calls` vieillissent et disparaissent via l'archivage mensuel en 12 mois.
+
+**Pourquoi pas de migration historique** :
+- 10M+ rows à déplacer = risque non nul, ~1h de maintenance supplémentaire
+- Les IDs migrés seraient fragmentés (47, 193, 8750504...) au lieu de séquentiels
+- La convergence naturelle (12 mois) est moins risquée et sans downtime
+
+**Contraintes techniques** :
+- MySQL interdit les FK sur tables partitionnées → FK supprimées, contraintes applicatives
+- La PK doit inclure la colonne de partition → `PRIMARY KEY (id, date)` au lieu de `(id)`
+- La UNIQUE KEY `provider_call_id` doit inclure `date` → `(provider_call_id, date)`
+
+**Partitionnement mensuel** — `PARTITION BY RANGE (YEAR(date) * 100 + MONTH(date))` :
+- 1 partition par mois (~1.6M rows/mois)
+- `DROP PARTITION` instantané pour l'archivage (vs DELETE lent sur 1.6M rows)
+- Partition pruning ×12 sur les requêtes filtrées par mois
+- Partitions créées jusqu'en 2029 + `p_future` comme filet de sécurité
+
+**Migration (via MySQL CLI, pas de migration Laravel pour la copie)** :
 
 ```sql
--- Étape 1 : Recréer la table avec partitionnement
--- ⚠️ Le partitionnement MySQL nécessite que la colonne de partition
--- fasse partie de la PRIMARY KEY et de tous les UNIQUE KEY
+-- La table calls_new est créée par la migration Laravel (vide, partitionnée)
+-- La copie se fait via MySQL CLI pour éviter les timeouts et avoir la progression
 
--- Problème : calls a une UNIQUE KEY sur provider_call_id qui n'inclut pas date
--- Solution : changer la UNIQUE KEY en un index normal + contrainte applicative
--- OU inclure date dans la UNIQUE KEY
+-- 1. Copie brute sans index (plus rapide)
+INSERT INTO calls_new SELECT * FROM calls;
 
-ALTER TABLE calls DROP INDEX calls_provider_call_id_unique;
-ALTER TABLE calls ADD UNIQUE KEY `calls_provider_date_unique` (`provider_call_id`, `date`);
+-- 2. Vérification
+SELECT (SELECT COUNT(*) FROM calls) AS source,
+       (SELECT COUNT(*) FROM calls_new) AS copie;
 
--- Puis partitionner par mois sur YEAR(date)*100+MONTH(date)
--- ⚠️ Les FK sur la table calls doivent être supprimées avant le partitionnement
--- MySQL ne supporte pas les FK sur les tables partitionnées
+-- 3. Index ajoutés APRÈS la copie (2-5× plus rapide que pendant l'INSERT)
+ALTER TABLE calls_new ADD UNIQUE KEY `calls_provider_call_id_unique` (`provider_call_id`, `date`);
+ALTER TABLE calls_new ADD KEY `service_type_fk_3743468` (`telecom_type_id`);
+ALTER TABLE calls_new ADD KEY `call_type_fk_3743469` (`call_type_id`);
+ALTER TABLE calls_new ADD KEY `calls_cdr_file_id_foreign` (`cdr_file_id`);
+ALTER TABLE calls_new ADD KEY `calls_number_index` (`number`, `price`);
+ALTER TABLE calls_new ADD KEY `uncharged` (`date`, `line_id`);
+ALTER TABLE calls_new ADD KEY `idx_line_date_price` (`line_id`, `date`, `price`);
+ALTER TABLE calls_new ADD KEY `calls_client_id_foreign` (`client_id`);
 
--- Alternative recommandée : ne pas partitionner directement,
--- mais implémenter l'archivage via un job qui déplace les vieux CDR
+-- 4. Bascule atomique (< 1 sec)
+RENAME TABLE calls TO calls_old, calls_new TO calls;
+ALTER TABLE calls MODIFY `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT;
 ```
 
-**Point d'attention CRITIQUE** : MySQL ne supporte pas les clés étrangères sur les tables partitionnées. La table `calls` a des FK (`line_id → lines`, `telecom_type_id → telecom_types`, `call_type_id → call_types`, `cdr_file_id → cdr_files`).
-
-**Options** :
-1. **Supprimer les FK sur `calls`** → les contraintes deviennent applicatives. Acceptable car `calls` est une table d'ingestion de données externes.
-2. **Ne pas partitionner, mais archiver** → un job mensuel déplace les CDR > 12 mois vers une table `calls_archive` (identique mais sans FK) et purge la table principale.
-3. **Les deux** → archiver + partitionner la table d'archive.
-
-**Recommandation** : Option 2 (archivage) en Phase 1, Option 3 si la volumétrie l'exige.
+→ **Process complet, rollback, checklist, job d'archivage modifié, cold storage : [doc 19](./19-GUIDE-MIGRATION-CALLS.md)**
 
 ### Phase 2 — Refonte de la table `invoices`
 
-#### Schéma cible
+> **Guide complet → [doc 20 — Guide de migration `invoices`](./20-GUIDE-MIGRATION-INVOICES.md)**
 
-```sql
--- Nouvelle structure normalisée
-CREATE TABLE `invoices_v2` (
-    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
-    `client_id` bigint UNSIGNED NOT NULL,
-    `number` varchar(20) NOT NULL,
-    `number_int` bigint UNSIGNED NOT NULL,
-    `label` varchar(255) DEFAULT NULL,
-    `date` date NOT NULL,
-    `due_date` date DEFAULT NULL,
-    `period_start` date DEFAULT NULL,
-    `period_end` date DEFAULT NULL,
+**Pourquoi on ne peut pas "couper au présent"** (contrairement à `calls`) :
+- Les factures ne vieillissent pas — rétention 10 ans, consultées régulièrement (espace client, compta, litiges)
+- Le problème (JSON blob 200-500 Ko/facture) concerne **toutes** les factures historiques, pas seulement les nouvelles
+- Il faut donc migrer l'historique — mais en arrière-plan, sans downtime
 
-    -- Totaux pré-calculés
-    `amount_ht` decimal(10,2) NOT NULL DEFAULT 0,
-    `amount_tva` decimal(10,2) NOT NULL DEFAULT 0,
-    `amount_ttc` decimal(10,2) NOT NULL DEFAULT 0,
+**Tables cibles** :
 
-    -- Statuts
-    `status` tinyint UNSIGNED NOT NULL DEFAULT 0,
-    `is_paid` tinyint(1) NOT NULL DEFAULT 0,
-    `is_locked` tinyint(1) NOT NULL DEFAULT 0,
-    `paid_at` datetime DEFAULT NULL,
+| Table | Rôle | Partitionnement |
+|-------|------|----------------|
+| `invoices_v2` | En-tête de facture (~23K rows sur 5 ans) | Non (volume trivial) |
+| `invoice_lines` | Lignes détaillées (~840K rows/an) | **Par année** (4M+ rows sur 5 ans) |
 
-    -- Paiement
-    `payment_method` varchar(50) DEFAULT NULL,
-    `payment_reference` varchar(100) DEFAULT NULL,
+**Contraintes techniques pour `invoice_lines`** :
+- Partitionnée par `YEAR(invoice_date)` → pas de FK MySQL
+- `invoice_date` dénormalisé depuis `invoices_v2.date` (requis pour le partitionnement)
+- Rempli automatiquement via event Laravel `creating`
+- Lien `invoice_id → invoices_v2` garanti par Eloquent (`belongsTo`)
 
-    -- Document PDF
-    `document_id` bigint UNSIGNED DEFAULT NULL,
-
-    -- Métadonnées (léger, pas le contenu complet)
-    `meta` json DEFAULT NULL,
-
-    `created_at` timestamp NULL DEFAULT NULL,
-    `updated_at` timestamp NULL DEFAULT NULL,
-    `deleted_at` timestamp NULL DEFAULT NULL,
-
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `invoices_v2_number_int_unique` (`number_int`),
-    KEY `idx_client_date` (`client_id`, `date`),
-    KEY `idx_status` (`status`),
-    KEY `idx_paid_locked` (`client_id`, `is_locked`, `is_paid`),
-    FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
-    FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB;
-
--- ⚠️ IMPORTANT : invoice_lines est PARTITIONNÉE par année (voir section détaillée plus bas)
--- car la volumétrie est massive (~840K rows/an, 4.2M+ sur 5 ans).
--- Le schéma simplifié ci-dessous montre la structure logique.
--- Le DDL complet avec partitionnement est dans la section
--- "Stratégie de partitionnement pour invoice_lines".
-
-CREATE TABLE `invoice_lines` (
-    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
-    `invoice_id` bigint UNSIGNED NOT NULL,
-    `invoice_date` date NOT NULL,  -- Dénormalisé depuis invoices_v2.date (requis pour le partitionnement)
-
-    -- Relation polymorphique (remplace line_id, service_id, device_id)
-    -- Permet de lier une ligne de facture à N'IMPORTE QUEL modèle facturable
-    -- sans modifier le schéma quand on ajoute un nouveau type de produit.
-    -- En Laravel : morphTo() / morphMany()
-    `billable_type` varchar(255) DEFAULT NULL,  -- Ex: 'App\Models\Line', 'App\Models\Device', 'App\Models\ServiceSheet'
-    `billable_id` bigint UNSIGNED DEFAULT NULL,  -- ID de l'entité liée
-
-    -- Type de ligne (varchar extensible, pas d'enum figé)
-    `type` varchar(50) NOT NULL,  -- 'plan','service','device','option','out_of_plan','adjustment','discount','license','hosting'...
-    `label` varchar(500) NOT NULL,
-    `description` text DEFAULT NULL,
-    `quantity` decimal(10,3) NOT NULL DEFAULT 1,
-    `unit_price_ht` decimal(10,4) NOT NULL DEFAULT 0,
-    `amount_ht` decimal(10,2) NOT NULL DEFAULT 0,
-    `tva_rate` decimal(5,2) NOT NULL DEFAULT 20.00,
-    `amount_tva` decimal(10,2) NOT NULL DEFAULT 0,
-    `amount_ttc` decimal(10,2) NOT NULL DEFAULT 0,
-    `sort_order` int NOT NULL DEFAULT 0,
-    `created_at` timestamp NULL DEFAULT NULL,
-    `updated_at` timestamp NULL DEFAULT NULL,
-
-    -- PK composite incluant la colonne de partition (contrainte MySQL)
-    PRIMARY KEY (`id`, `invoice_date`),
-    KEY `idx_invoice` (`invoice_id`),
-    KEY `idx_billable` (`billable_type`, `billable_id`),
-    KEY `idx_type_date` (`type`, `invoice_date`),
-    KEY `idx_invoice_date` (`invoice_id`, `invoice_date`)
-    -- ⚠️ Pas de FOREIGN KEY : MySQL interdit les FK sur tables partitionnées
-    -- La relation invoice_id → invoices_v2 est assurée par Laravel (belongsTo)
-) ENGINE=InnoDB
-PARTITION BY RANGE (YEAR(invoice_date)) (
-    PARTITION p2024 VALUES LESS THAN (2025),
-    PARTITION p2025 VALUES LESS THAN (2026),
-    PARTITION p2026 VALUES LESS THAN (2027),
-    PARTITION p2027 VALUES LESS THAN (2028),
-    PARTITION p_future VALUES LESS THAN MAXVALUE
-);
-
--- Exemples d'utilisation Laravel :
--- InvoiceLine::morphTo('billable') → Line, Device, ServiceSheet, ou tout futur modèle
--- Line::morphMany(InvoiceLine::class, 'billable') → toutes les lignes de facture liées
---
--- Avantages par rapport à l'ancien design (line_id + service_id + device_id) :
--- 1. Extensible : ajouter un nouveau produit facturable = créer un modèle PHP, zéro migration BDD
--- 2. Propre : pas de colonnes NULL inutiles (avant, 2 colonnes sur 3 étaient toujours NULL)
--- 3. Pattern Laravel natif : déjà utilisé dans le projet (addresses, media, tags via Spatie)
--- 4. Le champ `type` en varchar (pas enum) permet d'ajouter des types sans migration
--- 5. invoice_date est rempli automatiquement via un event Laravel (voir section partitionnement)
-```
-
-#### Stratégie de migration — NE PAS modifier la table existante
-
-**Principe fondamental** : On ne touche **jamais** à la structure de la table `invoices` actuelle. La V1 continue de fonctionner exactement comme avant pendant toute la transition. On crée les nouvelles tables **à côté**.
+**Séquence de migration (aucune fenêtre de maintenance)** :
 
 ```
-Phase A — Création (pas d'impact sur la V1)
-   1. Créer invoices_v2 et invoice_lines (vides, à côté de invoices)
-   2. La V1 continue de lire/écrire dans invoices normalement
-
-Phase B — Migration des données historiques
-   3. Script de migration batch (job queue) :
-      a. Pour chaque invoice existante :
-         - Parse le JSON doc
-         - Insère l'en-tête dans invoices_v2
-         - Parse les lignes du JSON et insère dans invoice_lines
-         - Recalcule et vérifie les totaux (checksum)
-      b. Vérification : comparer count + sum(amount) entre les deux tables
-
-Phase C — Dual-write (transition)
-   4. Le nouveau code de facturation V2 écrit dans les deux tables :
-      - invoices (JSON blob, pour la V1 qui lit encore)
-      - invoices_v2 + invoice_lines (normalisé, pour le nouveau code V2)
-   5. Le nouveau code V2 LIT uniquement depuis invoices_v2 + invoice_lines
-   6. La V1 continue de lire depuis invoices (aucun changement)
-
-Phase D — Bascule finale (quand V1 éteinte)
-   7. Renommer invoices → invoices_legacy (conservation 6 mois par sécurité)
-   8. Renommer invoices_v2 → invoices
-   9. Arrêter le dual-write
-   10. Supprimer invoices_legacy après confirmation
+Phase A — Migrations Laravel      : tables vides créées à côté de invoices   [< 1 sec]
+Phase B — Migration historique    : job queue background, checksum par facture [quelques heures]
+Phase C — Dual-write              : nouvelles factures écrivent dans les 2    [déploiement normal]
+Phase D — Bascule lecture         : V2 devient source de vérité              [déploiement normal]
+Phase E — Extinction dual-write   : invoices n'est plus écrite               [déploiement normal]
+Phase F — Bascule tables          : RENAME invoices_v2 → invoices            [optionnel, tardif]
 ```
 
-**Pourquoi cette approche** :
-- La table `invoices` avec son JSON blob est utilisée dans tout le code V1 (enregistrement ET lecture)
-- Modifier la structure existante obligerait à modifier le code V1 à **de nombreux endroits**
-- En créant de nouvelles tables à côté, le code V1 n'est **jamais** impacté
-- Le risque de régression est minimal : la V1 ne change pas, la V2 utilise ses propres tables
+**Gain attendu** :
+- `invoices` (JSON blob) : 3-4 Go → `invoices_v2` : quelques Mo
+- Requête facture client lourd : parse JSON 500 Ko en mémoire → SELECT B-tree indexé
+- Dashboards financiers et audits : instantanés
 
-**Gain estimé** :
-- `invoices_v2` sans JSON : quelques Mo au lieu de 3-4 Go (le JSON blob disparaît)
-- `invoice_lines` : requêtable, indexable, analysable — partitionnée par année pour gérer les 840K+ rows/an
-- Un client lourd (500-1000+ lignes/facture) : requête passant de "parse JSON 200-500 Ko en mémoire" à "SELECT sur index B-tree avec partition pruning"
-- Les dashboards financiers deviennent instantanés
+**Exigences non négociables** :
+- Checksum centime à chaque facture générée (`SUM(lignes) == en-tête ± 0.01€`)
+- Immutabilité post-verrouillage (`is_locked = 1` → `InvoiceLockedException`)
+- Arrondi par ligne (standard français, documenté et testé)
+- Snapshot client dans `meta` JSON léger (SIRET, adresse au moment de la facturation)
+- Migration idempotente (clé unique `number_int` → pas de doublon en cas de re-run)
 
-#### Faut-il partitionner `invoices_v2` et `invoice_lines` ?
+→ **DDL complet, job de migration, dual-write, checklist, rollback : [doc 20](./20-GUIDE-MIGRATION-INVOICES.md)**
 
-**Estimation de volumétrie (réaliste)** :
-```
-invoices_v2 (en-têtes) :
-  380 clients × 12 factures/an = 4 560 rows/an
-  Sur 5 ans = ~23 000 rows → quelques Mo → PAS de partitionnement nécessaire
-
-invoice_lines (lignes détaillées) :
-  ⚠️ Le nombre de lignes par facture varie fortement selon le client :
-  - Clients légers (~300) : ~20 lignes/facture (quelques forfaits + matériel)
-  - Clients lourds (~80)  : ~800 lignes/facture (500 forfaits + 300 matériels + services)
-  - Cas extrêmes : certains clients dépassent 1 000 lignes/facture
-
-  Clients légers : 300 × 12 × 20    =   72 000 rows/an
-  Clients lourds :  80 × 12 × 800   =  768 000 rows/an
-                                Total ≈  840 000 rows/an
-
-  Taille par row ≈ 500 octets (label ~100, description ~200, 6 decimals, index overhead)
-
-  Sur 3 ans  = ~2.5M rows ≈ 1.3 Go
-  Sur 5 ans  = ~4.2M rows ≈ 2.1 Go
-  Sur 10 ans = ~8.4M rows ≈ 4.2 Go (+ croissance clientèle)
-```
-
-**Verdict** :
-- `invoices_v2` (en-têtes) : **PAS de partitionnement** — 23K rows sur 5 ans, trivial.
-- `invoice_lines` : **OUI, partitionnement recommandé à partir de la Phase 2** — 4M+ rows sur 5 ans avec des factures pouvant contenir 500-1000+ lignes justifie un partitionnement par année.
-
-#### Stratégie de partitionnement pour `invoice_lines`
-
-**Pourquoi par année (et pas par mois)** :
-- Les factures sont mensuelles mais les requêtes portent souvent sur une **année fiscale**
-- 12 partitions par an serait excessif pour le volume (~840K rows/an = ~70K/mois)
-- Le partitionnement annuel donne un bon compromis pruning/complexité
-
-**Implémentation** :
-
-```sql
--- invoice_lines n'a PAS de FK sortante (grâce au design polymorphique),
--- seule la FK vers invoices_v2 est concernée.
--- ⚠️ MySQL interdit les FK sur tables partitionnées → contrainte applicative.
--- La FK invoice_id → invoices_v2 sera assurée par le code Laravel (relation belongsTo).
-
-CREATE TABLE `invoice_lines` (
-    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
-    `invoice_id` bigint UNSIGNED NOT NULL,
-    `invoice_date` date NOT NULL,  -- Dénormalisé depuis invoices_v2.date pour le partitionnement
-
-    -- Polymorphique
-    `billable_type` varchar(255) DEFAULT NULL,
-    `billable_id` bigint UNSIGNED DEFAULT NULL,
-
-    `type` varchar(50) NOT NULL,
-    `label` varchar(500) NOT NULL,
-    `description` text DEFAULT NULL,
-    `quantity` decimal(10,3) NOT NULL DEFAULT 1,
-    `unit_price_ht` decimal(10,4) NOT NULL DEFAULT 0,
-    `amount_ht` decimal(10,2) NOT NULL DEFAULT 0,
-    `tva_rate` decimal(5,2) NOT NULL DEFAULT 20.00,
-    `amount_tva` decimal(10,2) NOT NULL DEFAULT 0,
-    `amount_ttc` decimal(10,2) NOT NULL DEFAULT 0,
-    `sort_order` int NOT NULL DEFAULT 0,
-    `created_at` timestamp NULL DEFAULT NULL,
-    `updated_at` timestamp NULL DEFAULT NULL,
-
-    -- ⚠️ La colonne de partition (invoice_date) DOIT être dans la PK et les UNIQUE KEY
-    PRIMARY KEY (`id`, `invoice_date`),
-    KEY `idx_invoice` (`invoice_id`),
-    KEY `idx_billable` (`billable_type`, `billable_id`),
-    KEY `idx_type_date` (`type`, `invoice_date`),
-    KEY `idx_invoice_date` (`invoice_id`, `invoice_date`)
-) ENGINE=InnoDB
-PARTITION BY RANGE (YEAR(invoice_date)) (
-    PARTITION p2024 VALUES LESS THAN (2025),
-    PARTITION p2025 VALUES LESS THAN (2026),
-    PARTITION p2026 VALUES LESS THAN (2027),
-    PARTITION p2027 VALUES LESS THAN (2028),
-    PARTITION p_future VALUES LESS THAN MAXVALUE
-);
-
--- Job CRON annuel (ou Artisan command) pour ajouter une partition :
--- ALTER TABLE invoice_lines REORGANIZE PARTITION p_future INTO (
---     PARTITION p2028 VALUES LESS THAN (2029),
---     PARTITION p_future VALUES LESS THAN MAXVALUE
--- );
-```
-
-**Note sur `invoice_date`** :
-- C'est une **dénormalisation volontaire** de `invoices_v2.date`
-- Sans cette colonne, impossible de partitionner `invoice_lines` (MySQL exige que la colonne de partition soit dans la table)
-- Le coût est minime (4 octets/row) et elle est remplie automatiquement à l'insertion
-- En Laravel, un `creating` event ou un `Mutator` sur le modèle `InvoiceLine` copie la date depuis la facture parente
-
-```php
-// InvoiceLine.php — remplissage automatique de invoice_date
-protected static function booted(): void
-{
-    static::creating(function (InvoiceLine $line) {
-        $line->invoice_date ??= $line->invoice->date;
-    });
-}
-```
-
-#### Comportement des index MySQL avec partitionnement (référence `calls` et `invoice_lines`)
+#### Rappel — comportement des index sur tables partitionnées
 
 | Aspect | Comportement |
 |--------|-------------|
-| **Index locaux** | Chaque partition possède son propre B-tree. Un `WHERE invoice_date = '2025-06-15'` ne scanne que la partition `p2025` (**partition pruning**) |
-| **UNIQUE KEY** | **Doit inclure la colonne de partition** dans la clé. C'est pourquoi la PK est `(id, invoice_date)` et non `(id)` seul |
-| **Clés étrangères** | **Interdites** sur tables partitionnées MySQL. La relation `invoice_id → invoices_v2` est assurée par Laravel (`belongsTo`) |
-| **INSERT** | Routage automatique vers la bonne partition — transparent pour l'application |
-| **SELECT avec colonne de partition** | Partition pruning automatique → ne scanne que la/les partitions concernées |
-| **SELECT sans colonne de partition** | Scanne **toutes** les partitions → pas de gain, potentiellement plus lent qu'une table non partitionnée |
-| **COUNT(\*)** | Sans WHERE date → scanne tout. Avec WHERE date → seulement la partition ciblée |
-| **DROP PARTITION** | Suppression instantanée d'une partition entière (vs DELETE row-by-row) — idéal pour l'archivage fiscal après durée légale |
-| **REORGANIZE PARTITION** | Permet de découper `p_future` en année réelle + nouveau `p_future` — opération rapide |
-| **Taille des index** | Plus petits par partition → tiennent mieux en mémoire (buffer pool InnoDB) |
-| **EXPLAIN PARTITIONS** | Permet de vérifier que le pruning fonctionne : `EXPLAIN SELECT ... WHERE invoice_date BETWEEN ...` affiche les partitions scannées |
+| **Index locaux** | Chaque partition a son propre B-tree — `WHERE invoice_date = '2025-06-15'` ne scanne que `p2025` |
+| **UNIQUE KEY** | Doit inclure la colonne de partition → PK `(id, invoice_date)` |
+| **Clés étrangères** | Interdites sur tables partitionnées MySQL — contrainte applicative (Eloquent) |
+| **INSERT** | Routage automatique vers la bonne partition, transparent pour l'app |
+| **SELECT sans colonne de partition** | Scanne toutes les partitions — pas de gain |
+| **DROP PARTITION** | Instantané — idéal pour purge annuelle après 10 ans |
+| **REORGANIZE PARTITION** | Découpe `p_future` en nouvelle année + nouveau `p_future` |
 
-> **Règle d'or** : ne partitionner que les tables où la volumétrie le justifie ET où les requêtes filtrent systématiquement sur la colonne de partition.
-> - `calls` (12 Go+, filtre quasi-systématique sur `date`) → **OUI**
-> - `invoice_lines` (2-4 Go sur 5 ans, lignes massives par client) → **OUI, par année**
-> - `invoices_v2` (~23K rows sur 5 ans) → **NON**
+> **Règle d'or** : ne partitionner que les tables où la volumétrie le justifie ET où les requêtes filtrent sur la colonne de partition.
+> - `calls` (8.5 Go, filtre systématique sur `date`) → **partitionnement mensuel**
+> - `invoice_lines` (4M+ rows sur 5 ans, requêtes par année fiscale) → **partitionnement annuel**
+> - `invoices_v2` (~23K rows sur 5 ans) → **pas de partitionnement**
 
 ### Phase 2 bis — Finalisation de la migration tarification (en cours)
 
@@ -1068,15 +879,15 @@ La table `sims` a `client_id` et `line_id` mais pas de lien direct vers `collabo
 | 🔴 P0 | Créer `daily_call_summaries` + job | Dashboards rapides | 2 jours | Faible |
 | 🔴 P0 | Créer `daily_iot_summaries` + job | Dashboards IoT | 1 jour | Faible |
 | 🔴 P0 | Créer `daily_ucaas_summaries` + job | Dashboards UCaaS | 1 jour | Faible |
-| 🔴 P1 | Archivage CDR > 12 mois (partitionnement) | Taille table `calls` | 2 jours | Moyen |
-| 🟠 P1 | Refonte `invoices` (sortie du JSON blob) | Performance facturation | 5-7 jours | Élevé (migration données) |
-| 🟠 P1 | Partitionnement `invoice_lines` par année | Performance requêtes (4M+ rows sur 5 ans) | Inclus dans refonte invoices | Moyen (dénormalisation `invoice_date`) |
+| 🔴 P1 | **Partitionnement `calls`** — migration + séparation IoT/UCaaS | Performance + archivage instantané | ~1h maintenance | Moyen — [doc 19](./19-GUIDE-MIGRATION-CALLS.md) |
+| 🔴 P1 | **Partitionnement `calls_archive`** | Purge `DROP PARTITION` | ~30 min maintenance | Faible — [doc 19](./19-GUIDE-MIGRATION-CALLS.md) |
+| 🟠 P1 | **Refonte `invoices`** — JSON blob → `invoices_v2` + `invoice_lines` | Performance facturation | Plusieurs semaines (background) | Moyen — [doc 20](./20-GUIDE-MIGRATION-INVOICES.md) |
 | 🟡 P2 | Suppression tables `_bkp` (après validation équipe) | Propreté | 0.5 jour | Faible |
-| 🟡 P2 | Finaliser migration tarification (déjà en cours) | Maintenabilité | À confirmer | Faible (migration pilotée) |
+| 🟡 P2 | Finaliser migration tarification (déjà en cours) | Maintenabilité | À confirmer | Faible |
 | 🟡 P2 | Enrichir `monthly_summaries` (client_id, financier) | Reporting | 1 jour | Faible |
 | 🟡 P2 | Créer `monthly_iot_summaries` + job agrégation | Historique IoT long terme | 1 jour | Faible |
 | 🟡 P2 | Créer `monthly_ucaas_summaries` + job agrégation | Historique UCaaS long terme | 1 jour | Faible |
-| 🟡 P2 | Implémenter jobs de purge (daily > 18-24 mois, CDR archivage) | Conformité RGPD + performance | 1 jour | Faible |
+| 🟡 P2 | Jobs de purge (daily > 18-24 mois, cold storage archive) | Conformité RGPD + performance | 1 jour | Faible |
 | 🟢 P3 | Refonte `devis` (sortie du JSON) | Cohérence | 2-3 jours | Moyen |
 
 ---
