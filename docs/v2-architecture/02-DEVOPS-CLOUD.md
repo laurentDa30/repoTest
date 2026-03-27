@@ -56,7 +56,7 @@
     │  App Server 1  │ │ App Server 2 │ │  Worker      │
     │  (DEV1-Small)  │ │ (DEV1-Small) │ │  (queues)    │
     │  Docker        │ │ Docker       │ │  Docker      │
-    │  Laravel 14 +  │ │ Laravel 14 + │ │  horizon +   │
+    │  Laravel 13 +  │ │ Laravel 12 + │ │  horizon +   │
     │  stancl/tenant │ │ stancl/ten.  │ │  scheduler   │
     │  Nginx + PHP   │ │ Nginx + PHP  │ │  + sync jobs │
     └────────────────┘ └──────────────┘ └──────────────┘
