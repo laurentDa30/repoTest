@@ -48,7 +48,8 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 - **A) Une seule tarification "Cekoya"** : Complexe suivant la tarification et ou des modifications d'un fournisseur. Simple côté client, une seule vision et aucune nuance de tarification en fonction du fournisseur, marge plus restreinte
 - **B) Une tarification multiple fournisseurs** : Simple, Chaque fournisseur a son propre plan de tarification et on y applique une marge. Complexe côté client, 2 lignes Sérénité sur chaque fournisseur n'aurait pas la même tarification
 
-**Action** : En attente...
+**Action** : 
+- En attente...
 ---
 
 ### 4. Gestion des news par region
@@ -108,6 +109,13 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 - Budget ?
 
 ---
+
+### 8. Clients & Régions
+
+**Contexte** : La version de Rizom en cours deviendra à terme une région.
+
+**Questions** :
+- Les clients qui appartiendraient en temps normal à une autre entité doivent ils être transférable (cf #6) ? 
 
 ## Points resolus
 
