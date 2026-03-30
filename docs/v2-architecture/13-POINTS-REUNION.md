@@ -89,7 +89,7 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 
 ---
 
-### 6. NVIDIA Shark pour le module IA
+### 7. NVIDIA Shark pour le module IA
 
 **Contexte** : Les fonctionnalites IA (scoring prospect, assistant admin, prediction) seront positionnées sur plusieurs pages en fonction des utilisateurs et fonctions.
 
@@ -99,7 +99,7 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 
 ---
 
-### 7. Recrutement d'un 3eme developpeur
+### 8. Recrutement d'un 3eme developpeur
 
 **Contexte** : Recommandation d'un recrutement a 6-12 mois si la croissance se confirme
 
@@ -110,7 +110,7 @@ Liste des sujets qui necessitent une decision collective avant implementation.
 
 ---
 
-### 8. Clients & Régions
+### 9. Clients & Régions
 
 **Contexte** : La version de Rizom en cours deviendra à terme une région.
 
