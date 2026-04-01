@@ -18,6 +18,7 @@
 | Perte de données (Situation non testée en condition..possibilité de perte) | Faible | **CRITIQUE** |
 | Taille du serveur limite pouvant causer une impossibilité de réinstaller la BDD | Élevée | Élevé |
 | Incohérence entre env de dev et prod | Certaine | Moyen |
+| Déploiement cassé sans rollback | Élevée | Élevé |
 | Pas de scaling possible | Certaine | Élevé (objectif de doubler le parc) |
 
 ## 2. Infrastructure cible

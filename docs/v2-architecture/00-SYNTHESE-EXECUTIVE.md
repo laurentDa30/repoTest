@@ -23,7 +23,7 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 
 ## Décision structurante
 
-**Migration progressive (Strangler Fig)** — Pas de réécriture big-bang. La V2 se construit module par module en s'appuyant sur la base existante.
+**Migration progressive (Strangler Fig)** — Pas de réécriture. La V2 se construit module par module en s'appuyant sur la base existante.
 
 ## Architecture cible
 
@@ -46,11 +46,12 @@ Plateforme télécom B2B de gestion end-to-end : CRM, catalogue multi-fournisseu
 | Search | Laravel Scout + database driver | Recherche catalogue, clients, lignes (zéro service tiers) |
 | Temps réel | **Laravel Reverb** (remplacement Pusher) — **prêt pour production** | Natif Laravel, zéro coût tiers |
 | Signature | Yousign (existant) | Maintien |
-| Stockage fichiers | S3-compatible (Scaleway Object Storage) | Factures PDF, documents, exports |
+| Stockage fichiers | Sur le serveur Factures PDF, documents, exports | Sécurisation S3-compatible (Scaleway Object Storage) |
 | Monitoring | Laravel Pulse + Sentry + Grafana | Observabilité complète |
 | CI/CD | GitLab CI | Déjà sur GitLab |
 | Conteneurisation | Docker + Docker Compose (phase ultérieure) | Reproductibilité, pré-requis cloud — **pas prioritaire à ce stade** |
 | Hébergement | Scaleway (Paris) — migration ultérieure | Souveraineté FR, RGPD, coût maîtrisé |
+
 
 ## Roadmap condensée
 
@@ -206,7 +207,7 @@ Objectif : conteneurisation, migration cloud, fonctionnalités IA, scaling.
 
 ---
 
-## Découvertes critiques après analyse du schéma SQL (80+ tables)
+##  Analyse du schéma SQL +80 tables
 
 ### Problème n°1 : `invoices.doc` est un JSON blob
 
@@ -225,6 +226,7 @@ Les requêtes CDR par client nécessitent un JOIN systématique via `lines`. Ave
 Nouvelles tables `call_iots` et `call_ucass` pour séparer les CDR IoT et UCaaS de la table `calls` principale. Tables d'agrégation journalière dédiées. Jobs de traitement en cours de développement.
 
 ---
+
 
 > Détails complets dans les documents d'analyse par rôle :
 > - `01-ARCHITECTE-LOGICIEL.md` — Architecture modulaire + revue cybersécurité
