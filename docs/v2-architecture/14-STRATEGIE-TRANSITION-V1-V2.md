@@ -4,11 +4,13 @@
 
 | Élément | V1 actuelle | V2 cible |
 |---------|-------------|----------|
-| Stack | Laravel 10, Livewire 2, Blade, Bootstrap, MySQL | Laravel 12, Livewire 4, Tailwind, MySQL 8 multi-BDD |
-| Architecture | Monolithe couplé, 3 portails dans 1 app | Monolithe modulaire DDD-lite, API-first, multi-région |
-| Hébergement | On-premise (serveur local) | Scaleway cloud (Docker) |
+| Stack | Laravel 10 → **11 (en cours)**, Livewire 2 → **4 (en cours)**, Blade, Bootstrap, Chart.js, MySQL | Laravel **14**, Livewire 4, **Bootstrap conservé**, **Chart.js conservé**, MySQL 8 multi-BDD |
+| Architecture | Monolithe couplé, 3 portails dans 1 app | Monolithe modulaire DDD-lite, API (liaisons clients), multi-région |
+| Hébergement | On-premise (serveur local) | Scaleway cloud (ultérieur — Phase 4) |
 | Multi-tenancy | Aucun | stancl/tenancy v3 (database-per-tenant, Hub & Spoke) |
-| BDD | 1 MySQL avec ~80 tables, `calls` 12 Go, `invoices.doc` JSON blob | 1 BDD centrale + 1 BDD par région |
+| BDD | 1 MySQL avec ~80 tables, `calls` 12 Go, `invoices.doc` JSON blob | 1 BDD centrale + 1 BDD par région, tables séparées (calls, call_iots, call_ucass) |
+| Imports | toModel | **toCollection (en cours de migration)** |
+| Temps réel | Pusher | **Reverb (prêt pour production)** |
 | Clients | 380 clients, 6 000 lignes, ~12 utilisateurs internes | Multi-région avec isolation par franchise |
 | Équipe | 2 développeurs | 2-3 développeurs |
 
@@ -28,12 +30,12 @@
 
 ### Principe
 
-Créer un nouveau projet Laravel 12 vierge avec la structure modulaire DDD-lite, installer stancl/tenancy, définir toutes les tables V2, puis migrer les données de la V1 via des scripts ETL.
+Créer un nouveau projet Laravel 14 vierge avec la structure modulaire DDD-lite, installer stancl/tenancy, définir toutes les tables V2, puis migrer les données de la V1 via des scripts ETL.
 
 ```
 V1 (existante)                    V2 (nouveau projet)
 ┌──────────────────┐              ┌──────────────────┐
-│ Laravel 10       │    ETL       │ Laravel 12       │
+│ Laravel 10       │    ETL       │ Laravel 14       │
 │ 80+ tables       │ ──────────► │ Tables V2        │
 │ monolithe        │  (scripts)  │ DDD-lite         │
 │ BDD unique       │              │ stancl/tenancy   │
@@ -113,18 +115,20 @@ La V1 existante est progressivement transformée module par module. Le nouveau c
 ┌────────────────────────────────────────────────────────────────────────┐
 │                          MÊME CODEBASE                                 │
 │                                                                        │
-│  Phase 0    Phase 1         Phase 2          Phase 3       Phase 4     │
-│ ┌────────┐ ┌────────────┐ ┌──────────────┐ ┌───────────┐ ┌─────────┐ │
-│ │ V1     │ │V1 + tenant │ │V1/V2 hybride │ │V2 complet │ │V2 + N   │ │
-│ │ telle  │→│+ Redis     │→│+ modules DDD │→│+ portails │→│régions  │ │
-│ │ quelle │ │+ Docker    │ │+ invoices_v2 │ │+ cloud    │ │         │ │
-│ │        │ │+ CI/CD     │ │+ CDR splitté │ │           │ │         │ │
-│ └────────┘ └────────────┘ └──────────────┘ └───────────┘ └─────────┘ │
-│                                                                        │
-│  BDD:        BDD:          BDD:             BDD:          BDD:        │
-│  existante   + central     + tables V2      - tables V1   N régions   │
-│  inchangée   + tenant cfg  à côté de V1     obsolètes     autonomes   │
-│              V1=1er tenant dual-write        supprimées                │
+│  Phase 0       Phase 1         Phase 2          Phase 3       Phase 4     │
+│ ┌────────────┐ ┌────────────┐ ┌──────────────┐ ┌───────────┐ ┌─────────┐ │
+│ │ Montées    │ │ BDD + CDR  │ │ Structuration│ │ Multi-rég.│ │ Infra   │ │
+│ │ de version │→│+ invoices  │→│+ Redis,CI/CD │→│+ portails │→│+ IA     │ │
+│ │ L10→11→14  │ │+ call_iots │ │+ modules DDD │ │+ tenancy  │ │+ Docker │ │
+│ │ LW2→4      │ │+ call_ucass│ │+ API clients │ │+ SSO      │ │+ cloud  │ │
+│ │ Pusher→Rev.│ │+ agrégat.  │ │+ gateways    │ │+ sécurité │ │+ scaling│ │
+│ └────────────┘ └────────────┘ └──────────────┘ └───────────┘ └─────────┘ │
+│                                                                           │
+│  BDD:          BDD:           BDD:             BDD:          BDD:        │
+│  existante     + call_iots    + optimistic     + central     N régions   │
+│  inchangée     + call_ucass   lock (version)   + tenant cfg  autonomes   │
+│                + invoices_v2  + Redis cache     V1=1er tenant             │
+│                + agrégations  + audit trail                               │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,14 +225,14 @@ AUCUN ETL massif, AUCUN big-bang. Tout est incrémental.
 
 ### Principe
 
-Créer un nouveau dossier (ex: `app-v2/`) dans le même repo avec un projet Laravel 12 neuf. Ce projet V2 se connecte à la MÊME base de données que la V1 et crée ses nouvelles tables à côté des anciennes.
+Créer un nouveau dossier (ex: `app-v2/`) dans le même repo avec un projet Laravel 14 neuf. Ce projet V2 se connecte à la MÊME base de données que la V1 et crée ses nouvelles tables à côté des anciennes.
 
 ```
 /repo
 ├── app/           ← V1 (Laravel 10, en production)
 │   └── connecté à BDD existante
 │
-├── app-v2/        ← V2 (Laravel 12, en développement)
+├── app-v2/        ← V2 (Laravel 14, en développement)
 │   └── connecté à LA MÊME BDD
 │       ├── lit les tables V1 existantes (clients, lines, calls...)
 │       ├── crée de nouvelles tables V2 (invoices_v2, daily_call_summaries...)
@@ -331,7 +335,7 @@ Mais dans ce cas, c'est quasiment la **Stratégie A** avec un accès direct à l
 
 ### Ce qui existe déjà dans le repo
 
-Le dossier `app/` contient déjà un projet Laravel 12 avec :
+Le dossier `app/` contient déjà un projet Laravel 14 avec :
 - stancl/tenancy v3.9 configuré
 - Tenant model avec `HasDatabase`, `HasDomains`
 - Routes centrales et tenant séparées
@@ -339,49 +343,60 @@ Le dossier `app/` contient déjà un projet Laravel 12 avec :
 - Migrations centrales (tenants, domains) et tenant (clients, collaborators, lines, sims, devices, telecom_types)
 - Config multi-tenant complète (bootstrappers DB, cache, filesystem, queue)
 
-Le dossier `rizom-v2/` contient un template standalone Laravel 12 avec les packages cibles (Livewire 4, Spatie, Snappy PDF, Excel, etc.).
+Le dossier `rizom-v2/` contient un template standalone Laravel 14 avec les packages cibles (Livewire 4, Spatie, Snappy PDF, Excel, etc.).
 
 **La base V2 est déjà posée**. La prochaine étape est de connecter ce squelette à la BDD V1 existante.
 
-### Plan d'action concret
+### Plan d'action concret (aligné sur la roadmap doc 00)
 
 ```
-MAINTENANT → Phase 0 (1 mois)
-├── Prendre le codebase V1 existant (sur GitLab)
-├── Créer une branche v2/develop
-├── Laravel Shift : 10 → 11 → 12
-├── Installer stancl/tenancy sur le codebase V1
-├── Créer la BDD centrale + enregistrer V1 comme tenant 'idf'
-├── Dockeriser
-├── CI/CD GitLab CI
+MAINTENANT → Phase 0 — Montées de version (en cours)
+├── Laravel 10 → 11 (en cours)
+├── Livewire 2 → 4 (en cours)
+├── Pusher → Reverb (prêt pour production)
+├── Imports toModel → toCollection (en cours)
+├── Mise à jour packages dépendants
+└── Laravel 11 → 14 + PHP ≥ 8.3 (à planifier)
+
+Phase 1 — BDD, CDR et facturation
+├── Quick win CDR : client_id sur calls + monthly_summaries (en cours)
+├── Tables call_iots + call_ucass (en cours)
+├── Agrégations journalières + jobs (en cours)
+├── Suppression index inutiles sur calls (en cours)
+├── Refonte invoices (invoices_v2 + invoice_lines, dual-write, PDF async)
+├── Nettoyage BDD (pricing_zones, tables _bkp, orphelins)
+└── Enrichir monthly_summaries (financier + carbone)
+
+Phase 2 — Structuration applicative
 ├── Redis (cache, sessions, queues)
-├── Monitoring (Pulse + Sentry)
-└── La V1 tourne en production comme avant, mais est prête pour la V2
+├── Horizon + worker séparé (Supervisord)
+├── Optimistic lock (colonne version) sur tables éditables
+├── Cache lock Redis sur jobs critiques
+├── Audit trail (spatie/laravel-activitylog)
+├── CI/CD GitLab CI
+├── API REST v1 (liaisons clients uniquement)
+├── Pattern Gateway fournisseurs (Transatel, Unyc, Wazo)
+├── Laravel Scout (recherche)
+├── Modules DDD-lite (Client, Telecom, Billing, Catalog, CDR, Stock...)
+├── Contrats Billable + CollaboratorContract
+└── Nettoyage BDD (invoices_v2 → invoices, tables legacy)
 
-Phase 1 (2-3 mois)
-├── Quick win CDR : client_id + daily_call_summaries
-├── Refonte invoices (dual-write JSON → normalisé)
-├── API REST interne (routes tenant + centrales)
-├── Pattern Gateway pour les intégrations fournisseurs
-├── Sync catalogue Hub → régions
-├── Scout (search database driver)
-├── Reverb (remplace Pusher)
-└── Staging cloud Scaleway
-
-Phase 2 (2-3 mois)
-├── Modules DDD-lite (Client, Telecom, Billing, Catalog, Stock, CDR)
-├── Livewire 4 migration complète (2→3→4)
-├── Tailwind CSS (remplacement Bootstrap)
-├── Cloud production
-├── Provisioning 2ème région (PACA)
-└── Nettoyage BDD (tables _bkp, pricing_zones)
-
-Phase 3 (2-3 mois)
-├── Portails client + ambassadeur en Livewire 4
+Phase 3 — Multi-région, portails et sécurité
+├── stancl/tenancy + BDD centrale + V1 = tenant IDF
+├── Sync catalogue Hub → régions + SSO
+├── Portails client + ambassadeur Livewire 4 + Bootstrap
 ├── Dashboard Hub central
 ├── Provisioning automatisé de régions
+├── Sécurité : KMS, rétention RGPD, tests anti-fuite cross-tenant
 ├── Tests E2E + pen test
 └── Documentation API
+
+Phase 4 — Infrastructure, IA et scaling (ultérieure)
+├── Docker + Docker Compose
+├── Migration cloud Scaleway
+├── Monitoring (Pulse, Sentry, Grafana)
+├── IA (anomalies CDR, optimisation forfaits, scoring, churn)
+└── Scaling multi-région (Phase B si >5 régions)
 ```
 
 ---
@@ -392,9 +407,13 @@ Phase 3 (2-3 mois)
 
 ---
 
-### PHASE 0 — Fondations techniques (1 mois, ~20 jours de dev)
+### PHASE 0 — Montées de version et fondations (en cours)
 
-**Objectif** : Moderniser la stack sans toucher à la logique métier. À la fin de Phase 0, la V1 tourne sur Laravel 12, Livewire 4 (migration 2→3→4), Docker, Redis, avec CI/CD et multi-tenancy configuré. Les utilisateurs ne voient **aucune différence**.
+**Objectif** : Stabiliser la stack technique avant toute évolution fonctionnelle. À la fin de Phase 0, la V1 tourne sur Laravel 14, Livewire 4, Reverb. Les utilisateurs ne voient **aucune différence**.
+
+> **Statut actuel** : Laravel 10→11 en cours, Livewire 2→4 en cours, Pusher→Reverb prêt pour production, imports toModel→toCollection en cours.
+>
+> **Note** : Docker, Redis, CI/CD et stancl/tenancy sont reportés en Phase 2 (structuration applicative). La Phase 0 se concentre exclusivement sur les montées de version.
 
 #### Étape 0.1 — Préparer la branche de travail (0,5 jour)
 
@@ -477,7 +496,7 @@ composer update
 php artisan optimize:clear
 php artisan test   # DOIT passer
 
-# Étape 2 : monter vers Laravel 12
+# Étape 2 : monter vers Laravel 14
 composer require laravel/framework:^12.0 --no-update
 composer update
 php artisan optimize:clear
@@ -486,7 +505,7 @@ php artisan test   # DOIT passer
 
 ##### Packages à vérifier à chaque montée
 
-| Package V1 | Compatibilité Laravel 12 | Action |
+| Package V1 | Compatibilité Laravel 14 | Action |
 |------------|------------------------|--------|
 | `livewire/livewire` | v3+ requis (v2 incompatible) | Migrer en étape 0.3 |
 | `spatie/laravel-permission` v7 | Compatible | `composer update` suffit |
@@ -501,7 +520,7 @@ php artisan test   # DOIT passer
 | `pusher/pusher-php-server` v7 | Sera remplacé (étape 1.8) | Garder pour l'instant |
 
 **Pré-requis** : étape 0.1
-**Livrable** : `php artisan test` passe, application fonctionnelle sur Laravel 12
+**Livrable** : `php artisan test` passe, application fonctionnelle sur Laravel 14
 **Rollback** : `git revert` vers Laravel 10 si blocage critique
 
 ---
@@ -574,7 +593,7 @@ Pour chaque composant :
 └── Commit unitaire par composant migré
 ```
 
-**Pré-requis** : étape 0.2 (Laravel 12 requis pour Livewire 3+)
+**Pré-requis** : étape 0.2 (Laravel 14 requis pour Livewire 3+)
 **Livrable** : tous les composants Livewire fonctionnent en v3, puis montée rapide en v4 (voir doc 15 étape 9)
 **Rollback** : composant par composant (git revert du commit spécifique)
 
@@ -582,7 +601,7 @@ Pour chaque composant :
 
 #### Étape 0.4 — Autres packages à mettre à jour (1-2 jours)
 
-Après Laravel 12 + Livewire 4, vérifier et mettre à jour les packages restants :
+Après Laravel 14 + Livewire 4, vérifier et mettre à jour les packages restants :
 
 ```bash
 composer update --with-all-dependencies
@@ -805,7 +824,7 @@ Route::middleware(['web'])->group(function () {
 - Le code métier V1 tourne exactement comme avant
 - Seul changement visible : l'URL passe de `app.cekoya.fr` à `idf.cekoya.fr` (redirection 301)
 
-**Pré-requis** : étape 0.2 (Laravel 12)
+**Pré-requis** : étape 0.2 (Laravel 14)
 **Livrable** : tenancy configuré, V1 = tenant IDF, Hub central avec page vide
 **Rollback** : désactiver le middleware tenant = retour au comportement V1
 
@@ -842,18 +861,17 @@ L'audit trail enregistre automatiquement les modifications sur les modèles crit
 #### Résumé Phase 0 — Checklist de validation
 
 ```
-□ Laravel 12 installé, php artisan test passe
-□ Livewire 4 : tous les composants migrés et fonctionnels (2→3→4)
+□ Laravel 11 installé, php artisan test passe (en cours)
+□ Livewire 4 : tous les composants migrés et fonctionnels (en cours)
+□ Pusher remplacé par Laravel Reverb (prêt pour prod)
+□ Imports toModel → toCollection migrés (en cours)
 □ Tous les packages Composer compatibles et à jour
-□ Docker : docker compose up démarre l'environnement complet
-□ Redis : sessions, cache, queues fonctionnent
-□ CI/CD : pipeline lint + tests + build fonctionnel
-□ stancl/tenancy : V1 = tenant IDF, Hub central accessible
-□ Monitoring : Pulse dashboard opérationnel
-□ Audit trail : actif sur modèles critiques
+□ Laravel 14 + PHP ≥ 8.3 (à planifier après stabilisation)
 □ AUCUN changement fonctionnel métier
-□ Les utilisateurs ne voient aucune différence (sauf URL si changée)
+□ Les utilisateurs ne voient aucune différence
 ```
+
+> **Reporté en Phase 2** : Docker (étape 0.5 ci-dessus), Redis (0.6), CI/CD (0.7), stancl/tenancy (0.8), monitoring et audit trail (0.9). Ces étapes restent documentées ici pour référence technique mais ne font plus partie de la Phase 0.
 
 **Durée estimée** : 15-20 jours de dev
 **Risque principal** : incompatibilité Livewire 2→3 sur composants complexes
@@ -1240,9 +1258,68 @@ class ArchiveOldCDRJob implements ShouldQueue
 
 ---
 
-### PHASE 2 — Modularisation + Frontend moderne (2-3 mois)
+### PHASE 2 — Structuration applicative (2-3 mois)
 
-**Objectif** : Restructurer le code en modules DDD-lite, migrer le frontend de Bootstrap vers Tailwind, nettoyer le schéma BDD, déployer en cloud, provisionner une 2ème région.
+**Objectif** : Structurer le code en modules DDD-lite, mettre en place l'outillage transversal (Redis, CI/CD, Horizon, worker séparé, audit trail), isoler les intégrations, nettoyer le schéma BDD.
+
+#### Étape 2.0 — Concurrence et intégrité des données (2-3 jours)
+
+Avec plusieurs portails (admin, client, ambassadeur) et des jobs en arrière-plan, les accès concurrents aux mêmes données sont inévitables. Voir le document dédié `18-CONCURRENCE-INTEGRITE-DONNEES.md` pour la stratégie complète.
+
+**Migration à effectuer** — ajouter une colonne `version` sur les tables éditables par plusieurs utilisateurs :
+
+```sql
+-- Tables nécessitant l'optimistic lock (colonne version)
+ALTER TABLE clients ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE collaborators ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE prospects ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE lines ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE invoices_v2 ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE tickets ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 0;
+```
+
+**Tables qui n'en ont PAS besoin** (insertion/upsert uniquement par jobs) :
+- `calls`, `call_iots`, `call_ucass` → upsert via `provider_call_id` (UNIQUE KEY)
+- `daily_*_summaries`, `monthly_summaries` → upsert idempotent (`ON DUPLICATE KEY UPDATE`)
+- `invoice_lines` → immutables une fois générées (liées à la facture)
+
+**Trait Laravel** — implémentation sur les modèles concernés :
+
+```php
+trait HasOptimisticLock
+{
+    public function saveWithLock(array $attributes): bool
+    {
+        $currentVersion = $this->version;
+        $updated = static::where('id', $this->id)
+            ->where('version', $currentVersion)
+            ->update(array_merge($attributes, ['version' => $currentVersion + 1]));
+
+        if ($updated === 0) {
+            throw new StaleModelException(
+                "Donnée modifiée par un autre utilisateur. Veuillez rafraîchir."
+            );
+        }
+        return true;
+    }
+}
+```
+
+**Cache lock Redis** — pour les jobs critiques (imports, génération factures) :
+
+```php
+// Un seul import Transatel à la fois
+$lock = Cache::lock('import:transatel', 3600);
+if (! $lock->get()) {
+    $this->release(60); // Réessayer dans 60s
+    return;
+}
+```
+
+**Pré-requis** : Redis (étape 0.6 / Phase 2A), `invoices_v2` (Phase 1B)
+**Livrable** : aucune perte de données en cas d'édition concurrente, jobs sérialisés
+
+---
 
 #### Étape 2.1 — Extraction des modules DDD-lite (5-7 jours par module critique)
 
@@ -1284,25 +1361,22 @@ app/Modules/
 
 ---
 
-#### Étape 2.2 — Migration Bootstrap → Tailwind CSS (progressive, 3-5 jours)
+#### Étape 2.2 — Améliorations CSS Bootstrap (progressive, 2-3 jours)
 
-```bash
-# Installation Tailwind CSS 4
-npm install tailwindcss @tailwindcss/forms @tailwindcss/typography
-```
+> **Décision** : Bootstrap est **conservé en V2** (voir doc `04-FRONTEND`). La migration vers Tailwind a été écartée — coût disproportionné pour 2 devs, zéro valeur métier.
 
-**Stratégie de coexistence** (temporaire) :
-- Nouveau code = Tailwind uniquement
-- Ancien code Bootstrap = migré page par page
-- Préfixe CSS possible (`tw-`) si conflits visuels
-- Supprimer Bootstrap une fois toutes les pages migrées
+**Améliorations progressives** :
+- Créer un fichier `_variables.scss` centralisé (couleurs, typographie Cekoya)
+- Nettoyer les overrides CSS orphelins lors des refactos de vues
+- Utiliser les composants Bootstrap 5 natifs (accordions, offcanvas, toasts)
+- Monter vers Bootstrap 5.x si nécessaire
 
-**Composants Blade réutilisables** (design system) :
+**Composants Blade réutilisables** (design system Bootstrap) :
 
 ```
 resources/views/components/
 ├── ui/
-│   ├── button.blade.php         # Boutons (primary, secondary, danger, etc.)
+│   ├── button.blade.php         # Boutons Bootstrap (primary, secondary, danger, etc.)
 │   ├── modal.blade.php          # Modals avec Alpine.js
 │   ├── table.blade.php          # Tables avec pagination
 │   ├── status-badge.blade.php   # Badges de statut (actif, suspendu, résilié)
@@ -1313,7 +1387,7 @@ resources/views/components/
 │       ├── select.blade.php
 │       └── textarea.blade.php
 ├── charts/
-│   └── apex-chart.blade.php     # Wrapper ApexCharts (remplace Chart.js)
+│   └── chartjs-wrapper.blade.php  # Wrapper Chart.js v4 (conservé, pas d'ApexCharts)
 └── layout/
     ├── app.blade.php            # Layout admin
     ├── client.blade.php         # Layout portail client
@@ -1381,15 +1455,20 @@ La région PACA naît directement en V2 — aucune dette technique.
 #### Résumé Phase 2 — Checklist de validation
 
 ```
+□ Redis opérationnel (cache, sessions, queues)
+□ Laravel Horizon déployé, queues séparées (imports, aggregation, billing)
+□ Worker séparé via Supervisord
+□ Optimistic lock (colonne version) sur tables éditables (voir doc 18)
+□ Cache lock Redis sur jobs critiques (imports, factures)
+□ Audit trail (spatie/laravel-activitylog) actif sur modèles sensibles
+□ CI/CD GitLab CI fonctionnel (lint + tests + build)
 □ Au moins 6 modules DDD-lite extraits et fonctionnels
 □ Isolation inter-modules respectée (pas d'imports directs croisés)
-□ Tailwind CSS utilisé sur toutes les nouvelles pages
-□ Design system Blade components créé et documenté
-□ Bootstrap retiré (ou en cours de retrait)
+□ API REST v1 (liaisons clients) opérationnelle
+□ Pattern Gateway implémenté (Transatel, Unyc, Wazo)
+□ Design system Blade components Bootstrap créé et documenté
 □ Tables _bkp et pricing_zones supprimées
 □ invoices_v2 renommé en invoices, dual-write stoppé
-□ Application déployée en cloud Scaleway (staging → production)
-□ Région PACA provisionnée et fonctionnelle
 □ Tests de non-régression passent
 ```
 
@@ -1411,7 +1490,7 @@ Pages :
 - Profil : paramètres compte, mot de passe
 - Notifications : alertes dépassement, messages admin
 
-Tout en Livewire 4 + Tailwind + Alpine.js. Le portail consomme l'API v1 interne (construite en Phase 1).
+Tout en Livewire 4 + Bootstrap + Alpine.js. Le portail consomme l'API v1 interne (construite en Phase 2).
 
 ---
 
@@ -1491,16 +1570,19 @@ Documentation OpenAPI/Swagger générée automatiquement depuis les Form Request
 #### Résumé Phase 3 — Checklist de validation
 
 ```
+□ stancl/tenancy configuré, V1 = tenant IDF, Hub central accessible
+□ Sync catalogue Hub → régions fonctionnel
+□ SSO inter-régions opérationnel
 □ Portail client fonctionnel et accessible
 □ Portail ambassadeur fonctionnel et accessible
 □ Dashboard Hub central opérationnel
 □ Provisioning de région automatisé et testé
+□ Sécurité : KMS, rétention RGPD, tests anti-fuite cross-tenant
 □ Tests E2E passent sur tous les parcours critiques
 □ Pen test externe réalisé, findings corrigés
 □ Isolation cross-tenant vérifiée (zéro fuite)
 □ Documentation API publiée
-□ Au moins 3 régions opérationnelles (IDF, PACA, Lyon)
-□ Bootstrap complètement retiré
+□ Au moins 2-3 régions opérationnelles
 ```
 
 ---
@@ -1523,7 +1605,7 @@ Documentation OpenAPI/Swagger générée automatiquement depuis les Form Request
 | Risque | Phase | Probabilité | Sévérité | Mitigation |
 |--------|-------|-------------|----------|------------|
 | **Livewire 2→3 casse des composants** | 0 | Élevée | MOYEN | Migration un par un, test après chaque composant, commit unitaire |
-| **Package incompatible Laravel 12** | 0 | Moyenne | MOYEN | Vérifier avant montée, chercher alternative si besoin |
+| **Package incompatible Laravel 14** | 0 | Moyenne | MOYEN | Vérifier avant montée, chercher alternative si besoin |
 | **Backfill client_id bloque la prod** | 1 | Faible | ÉLEVÉ | Batches de 100K, job en queue, pas de lock table |
 | **JSON invoices malformé** | 1 | Moyenne | MOYEN | Log des erreurs, traitement au cas par cas, ne bloque pas le batch |
 | **Dual-write désynchronisé** | 1 | Moyenne | ÉLEVÉ | Job réconciliation horaire, alertes, checksum |
@@ -1539,37 +1621,46 @@ Documentation OpenAPI/Swagger générée automatiquement depuis les Form Request
 ## Dépendances entre étapes
 
 ```
-PHASE 0 (séquentiel obligatoire) :
-0.1 Branche ──→ 0.2 Laravel 12 ──→ 0.3 Livewire 3→4 ──→ 0.4 Packages
+PHASE 0 — Montées de version (en cours) :
+0.1 Laravel 10→11 ──→ 0.2 Livewire 2→4 ──→ 0.3 Reverb ──→ 0.4 toCollection
                                                               │
-0.5 Docker ──→ 0.6 Redis ──→ 0.7 CI/CD                      │
-                    │                                          │
-                    └────→ 0.8 stancl/tenancy ←────────────────┘
-                              │
-                              └──→ 0.9 Monitoring
+                                                              └──→ 0.5 Packages → 0.6 Laravel 14 + PHP ≥8.3
 
-PHASE 1 (partiellement parallélisable) :
-1.1 client_id calls ──→ 1.2 daily_summaries ──→ 1.9 Archivage CDR
-1.3 monthly_summaries (parallèle avec 1.1)
-1.4 Normaliser invoices (parallèle avec 1.1-1.3)
-1.5 API REST (après 1.1-1.4, utilise les nouvelles tables)
-1.6 Gateways (parallèle avec 1.5)
-1.7 Horizon (après 0.6 Redis)
-1.8 Reverb (parallèle)
+PHASE 1 — BDD, CDR et facturation :
+1A CDR :
+  1.1 client_id calls ──→ 1.5 daily_summaries ──→ 1.6 Jobs agrégation
+  1.3 call_iots (parallèle) ──→ daily_iot_summaries
+  1.4 call_ucass (parallèle) ──→ daily_ucaas_summaries
+  1.2 client_id monthly_summaries (parallèle)
+  1.7 Suppression index (après tests)
 
-PHASE 2 (partiellement parallélisable) :
-2.1 Modules DDD (après Phase 1 API)
-2.2 Tailwind (parallèle avec 2.1)
-2.3 Nettoyage BDD (après 1.4 invoices normalisé)
-2.4 Cloud (parallèle avec 2.1-2.3)
-2.5 Provisioning PACA (après 2.4 cloud + 0.8 tenancy)
+1B Facturation :
+  1.9 invoices_v2 + invoice_lines ──→ 1.10 Migration JSON ──→ 1.11 Dual-write
+  1.12 PDF async (après 1.9)
 
-PHASE 3 (après Phase 2) :
-3.1 Portail client ──→ 3.5 Tests E2E
-3.2 Portail ambassadeur (parallèle avec 3.1)
-3.3 Hub central (parallèle avec 3.1)
-3.4 Provisioning auto (après 2.5 test manuel)
-3.6 Documentation API (après 1.5 API stabilisée)
+1C Nettoyage :
+  1.13 pricing_zones/_bkp + 1.14 orphelins (parallèle, après validation)
+
+PHASE 2 — Structuration applicative :
+  Redis ──→ Horizon ──→ Worker séparé
+               │
+               └──→ 2.0 Optimistic lock + cache lock (voir doc 18)
+  Audit trail (parallèle)
+  CI/CD (parallèle)
+  API REST (après Phase 1)
+  Gateways fournisseurs (parallèle avec API)
+  Scout (parallèle)
+  Modules DDD (après API) ──→ Contrat Billable + CollaboratorContract
+
+PHASE 3 — Multi-région, portails et sécurité :
+  stancl/tenancy (après modules) ──→ Sync catalogue ──→ SSO ──→ Provisioning
+  Portails client + ambassadeur + Hub (après tenancy)
+  Sécurité (KMS, RGPD, tests cross-tenant) ──→ Pen test
+
+PHASE 4 — Infrastructure, IA et scaling :
+  Docker → Cloud Scaleway → Monitoring → Backup par tenant → Archivage CDR
+  IA (anomalies, forfaits, scoring, churn, assistant) — après agrégations Phase 1
+  Scaling Phase B (si >5 régions)
 ```
 
 ---
@@ -1609,7 +1700,7 @@ Combien de développeurs ?
 
 ## Annexe : Et le dossier `rizom-v2/` ?
 
-Le dossier `rizom-v2/` dans le repo contient un projet Laravel 12 standalone avec tous les packages cibles :
+Le dossier `rizom-v2/` dans le repo contient un projet Laravel 14 standalone avec tous les packages cibles :
 
 ```
 Packages de référence (à porter dans le codebase V1 lors de la Phase 0-1) :

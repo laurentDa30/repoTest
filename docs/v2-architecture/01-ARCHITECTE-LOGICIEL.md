@@ -17,13 +17,13 @@
 | **Table `calls` à 12 Go sans `client_id`** | Pas de `client_id` direct → chaque requête CDR par client nécessite un JOIN via `lines` sur 12 Go+. Pas de partitionnement. | CRITIQUE |
 | **Table `invoices` = JSON blob** | `doc` (JSON) contient l'intégralité de la facture ; GENERATED STORED extraient les champs résumés. Chaque SELECT charge le JSON complet → mémoire saturée | CRITIQUE |
 | **3 portails dans 1 seul repo/app** | Déploiement monobloc, risque de régression croisée | ÉLEVÉ |
-| **Pas de Docker** | Pas de reproductibilité env, déploiements manuels risqués | MOYEN |
+| **Pas de Docker pour les services** | Postgres, Redis, mail non conteneurisés → "ça marche sur ma machine", création de tenants (BDD) non reproductible entre devs | MOYEN |
 | **Pas de CI/CD** | Pas de filet de sécurité, tests manuels | MOYEN |
 | **Hébergement local** | SPOF, pas de scaling, pas de redondance | ÉLEVÉ |
 | **Pas de cache applicatif** | Requêtes BDD répétées inutilement | MOYEN |
-| **Laravel 10 / Livewire 2** | Versions en fin de support, dette qui s'accumule | MOYEN |
+| **Laravel 10 / Livewire 2** | Versions en fin de support, dette qui s'accumule — **montée vers Laravel 11 + Livewire 4 en cours** | MOYEN |
 
-## 2. Architecture cible : Monolithe Modulaire DDD-lite + Multi-région
+## 2. Architecture cible : Monolithe Modulaire DDD-lite + Multi-région (Laravel 14)
 
 ### Pourquoi PAS de microservices
 
@@ -39,9 +39,9 @@ Avec 2 développeurs, les microservices sont **contre-productifs** :
 
 ```
 Hub Central ──── catalogue partagé, monitoring, SSO
-    ├── Région IDF (App + BDD propre)
-    ├── Région PACA (App + BDD propre)
-    └── Région Lyon (App + BDD propre)
+    ├── Région Réunion (App + BDD propre)  ← V1 actuelle, première région
+    ├── Région Métropole (App + BDD propre)
+    └── Région Mayotte (App + BDD propre)
 ```
 
 **Implémentation** : `stancl/tenancy` v3 avec database-per-tenant. Codebase unique, switch automatique de BDD par sous-domaine. La V1 actuelle devient la première région (zéro migration de données initiale).
@@ -53,33 +53,73 @@ Chaque module adopte une organisation en 3 couches :
 - **Application/** : Actions/Services applicatifs (cas d'usage), DTOs
 - **Infrastructure/** : Eloquent repositories, mail, queue, API clients
 
+#### Organisation des portails dans chaque module
+
+Un module qui expose des fonctionnalités sur plusieurs portails (Hub, Tenant, Client, Ambassadeur) organise ses controllers, requests, resources et composants Livewire **par portail** dans le sous-dossier `Infrastructure/Http/`. Les routes sont également séparées par portail dans `routes/`.
+
+**Principe** : le Domain et l'Application sont **agnostiques du portail** — seule la couche Http sait quel portail elle sert. Un `IotSimService` ou une `CreateQuotaAlertAction` est appelé indifféremment par un controller Tenant ou Client.
+
 ```
 app/
 ├── Modules/
-│   ├── Prospect/           # Gestion prospects, devis prospect
-│   │   ├── Domain/
-│   │   │   ├── Models/           # Entités avec logique métier
-│   │   │   ├── ValueObjects/     # Ex: ProspectStatus, ContactInfo
-│   │   │   ├── Events/           # ProspectConverted, DevisAccepted
-│   │   │   └── Contracts/        # Interfaces exposées aux autres modules
-│   │   ├── Application/
-│   │   │   ├── Actions/          # ConvertProspectToClientAction
-│   │   │   ├── Services/         # ProspectService (orchestration)
-│   │   │   ├── DTOs/             # CreateProspectDTO, ProspectListDTO
-│   │   │   └── Listeners/        # Réactions aux events d'autres modules
+│   ├── IoT/                      # Exemple complet d'un module multi-portail
+│   │   ├── Domain/               # Métier pur — agnostique du portail
+│   │   │   ├── Models/
+│   │   │   ├── ValueObjects/
+│   │   │   ├── Events/
+│   │   │   └── Contracts/
+│   │   ├── Application/          # Cas d'usage — agnostique du portail
+│   │   │   ├── Actions/
+│   │   │   ├── Services/
+│   │   │   ├── DTOs/
+│   │   │   └── Listeners/
 │   │   ├── Infrastructure/
-│   │   │   ├── Repositories/     # EloquentProspectRepository
+│   │   │   ├── Repositories/
 │   │   │   ├── Http/
-│   │   │   │   ├── Controllers/
-│   │   │   │   ├── Resources/    # API Resources
-│   │   │   │   └── Requests/     # Form Requests (validation)
-│   │   │   ├── Jobs/             # Queue jobs
-│   │   │   └── Providers/        # ServiceProvider du module (bindings)
-│   │   └── routes.php
+│   │   │   │   ├── Tenant/              # Admin régional — gestion complète
+│   │   │   │   │   ├── Controllers/     #   SimController, QuotaController...
+│   │   │   │   │   ├── Requests/        #   CreateSimRequest, UpdateQuotaRequest...
+│   │   │   │   │   ├── Resources/       #   SimResource, QuotaResource...
+│   │   │   │   │   └── Livewire/        #   SimTable, QuotaDashboard...
+│   │   │   │   └── Client/              # Portail client — vue limitée
+│   │   │   │       ├── Controllers/     #   ClientIoTDashboardController...
+│   │   │   │       ├── Requests/        #   (peu de requests, vues read-only)
+│   │   │   │       ├── Resources/       #   ClientSimResource (champs restreints)
+│   │   │   │       └── Livewire/        #   ClientIoTOverview...
+│   │   │   ├── Jobs/
+│   │   │   └── Providers/        # IoTServiceProvider (bindings + chargement routes)
+│   │   ├── routes/
+│   │   │   ├── tenant.php        # Routes admin IoT (prefix: iot/, name: tenant.iot.*)
+│   │   │   └── client.php        # Routes client IoT (prefix: iot/, name: client.iot.*)
+│   │   └── resources/views/
+│   │       ├── tenant/           # Vues admin
+│   │       └── client/           # Vues client
+│   │
+│   ├── Prospect/                 # Module mono-portail (tenant uniquement)
+│   │   ├── Domain/
+│   │   │   ├── Models/
+│   │   │   ├── ValueObjects/
+│   │   │   ├── Events/
+│   │   │   └── Contracts/
+│   │   ├── Application/
+│   │   │   ├── Actions/
+│   │   │   ├── Services/
+│   │   │   ├── DTOs/
+│   │   │   └── Listeners/
+│   │   ├── Infrastructure/
+│   │   │   ├── Repositories/
+│   │   │   ├── Http/
+│   │   │   │   └── Tenant/              # Tenant uniquement — pas de sous-dossier Client/
+│   │   │   │       ├── Controllers/
+│   │   │   │       ├── Resources/
+│   │   │   │       └── Requests/
+│   │   │   ├── Jobs/
+│   │   │   └── Providers/
+│   │   └── routes/
+│   │       └── tenant.php
 │   │
 │   ├── Client/             # Clients, agences, référents, préférences, collaborateurs (entité pivot)
 │   ├── Telecom/            # Lignes mobile/fixe/internet, SIMs, portabilités
-│   ├── IoT/                # SIMs IoT, quotas spécifiques, CDR IoT séparés
 │   ├── UCaaS/              # Wazo : communications unifiées, VoIP, collaboration
 │   ├── Infogerance/        # Parc informatique, GLPI (s'appuie sur les collaborateurs du module Client)
 │   ├── Catalog/            # Matériels, services, forfaits, fournisseurs
@@ -89,13 +129,13 @@ app/
 │   ├── CDR/                # Consommations — stockage et agrégation (partitionné par type : mobile, IoT, UCaaS)
 │   ├── Stock/              # Gestion stock, SIMs physiques, appareils
 │   ├── Integration/        # Connecteurs fournisseurs (Transatel, Unyc, Wazo, IELO, euroFIBER)
-│   ├── Ambassador/         # Programme ambassadeur, paiements
+│   ├── Ambassador/         # Programme ambassadeur, paiements (portails : tenant + ambassador)
 │   ├── Environment/        # Module RSE, émissions, captation
 │   ├── Content/            # Rapports, nouveautés, mailing, templates
 │   ├── Auth/               # Authentification, rôles, permissions
 │   ├── Finance/            # Dashboard finance, analyse, exports
 │   ├── IA/                 # Intelligence artificielle (anomalies CDR, scoring, optimisation forfaits, assistant)
-│   └── Central/            # Hub multi-région (catalogue, sync, dashboard global)
+│   └── Central/            # Hub multi-région — exclusivement hub central (catalogue, sync, dashboard global)
 │
 ├── Shared/                 # Code partagé entre modules
 │   ├── Traits/
@@ -105,7 +145,149 @@ app/
 │   └── DTOs/
 ```
 
-> **Note multi-région** : Les modules ci-dessus s'exécutent dans chaque instance régionale. Le module `Central/` ne tourne que sur le Hub et gère la synchronisation catalogue, le registry des régions et le SSO.
+#### Matrice portails × modules
+
+Chaque module n'expose des routes que sur les portails où il a des fonctionnalités. Le ServiceProvider de chaque module ne charge que les fichiers de routes pertinents selon le contexte d'exécution.
+
+| Module | Hub Central | Tenant (admin) | Client | Ambassadeur |
+|--------|:-----------:|:--------------:|:------:|:-----------:|
+| **Central** | ✅ (exclusif) | — | — | — |
+| **Client** | — | ✅ | ✅ | — |
+| **Telecom** | — | ✅ | ✅ | — |
+| **IoT** | — | ✅ | ✅ | — |
+| **UCaaS** | — | ✅ | ✅ | — |
+| **Infogerance** | — | ✅ | ✅ | — |
+| **Billing** | — | ✅ | ✅ | — |
+| **CDR** | — | ✅ | ✅ | — |
+| **Stock** | — | ✅ | — | — |
+| **Catalog** | ✅ (sync) | ✅ | — | — |
+| **Ticket** | — | ✅ | ✅ | — |
+| **Order** | — | ✅ | ✅ | — |
+| **Prospect** | — | ✅ | — | — |
+| **Ambassador** | — | ✅ | — | ✅ |
+| **Environment** | — | ✅ | ✅ | — |
+| **Finance** | ✅ (global) | ✅ | — | — |
+| **Content** | — | ✅ | ✅ | ✅ |
+| **Auth** | ✅ | ✅ | ✅ | ✅ |
+| **IA** | — | ✅ | ✅ | — |
+| **Integration** | — | ✅ (interne) | — | — |
+
+#### Chargement conditionnel des routes par portail
+
+Chaque module charge ses routes **uniquement** dans le bon contexte via son ServiceProvider. Le contexte est déterminé par `stancl/tenancy` (central vs tenant) et par le domaine (tenant vs client vs ambassadeur).
+
+```php
+// app/Modules/IoT/Infrastructure/Providers/IoTServiceProvider.php
+
+public function boot(): void
+{
+    // Contexte tenant (admin régional OU portail client/ambassadeur)
+    if ($this->app->bound('tenancy') && tenancy()->initialized) {
+
+        // Routes admin régional — domaine : {region}.cekoya.fr
+        if ($this->isTenantPortal()) {
+            $this->loadRoutesFrom(__DIR__ . '/../../routes/tenant.php');
+        }
+
+        // Routes client — domaine : {region}-client.cekoya.fr
+        if ($this->isClientPortal()) {
+            $this->loadRoutesFrom(__DIR__ . '/../../routes/client.php');
+        }
+    }
+
+    // Le module IoT n'a pas de routes sur le Hub central
+    // → pas de chargement en contexte central
+}
+```
+
+```php
+// app/Modules/Central/Infrastructure/Providers/CentralServiceProvider.php
+
+public function boot(): void
+{
+    // Le module Central ne charge ses routes QUE sur le Hub
+    if ($this->isCentralDomain()) {
+        $this->loadRoutesFrom(__DIR__ . '/../../routes/central.php');
+    }
+    // En contexte tenant → le module ne fait rien, il n'est pas chargé
+}
+```
+
+**Helpers de détection du portail** (trait partagé) :
+
+```php
+// app/Shared/Traits/DetectsPortal.php
+
+trait DetectsPortal
+{
+    protected function isCentralDomain(): bool
+    {
+        return request()->getHost() === config('tenancy.central_domains')[0];
+    }
+
+    protected function isTenantPortal(): bool
+    {
+        $host = request()->getHost();
+        return !$this->isCentralDomain()
+            && !str_contains($host, '-client.')
+            && !str_contains($host, '-amba.');
+    }
+
+    protected function isClientPortal(): bool
+    {
+        return str_contains(request()->getHost(), '-client.');
+    }
+
+    protected function isAmbassadorPortal(): bool
+    {
+        return str_contains(request()->getHost(), '-amba.');
+    }
+}
+```
+
+#### Convention de nommage des routes
+
+Chaque fichier de routes utilise un préfixe de nom qui identifie le portail, suivi du nom du module :
+
+```php
+// app/Modules/IoT/routes/tenant.php
+Route::middleware(['web', 'auth', 'tenant'])
+    ->prefix('iot')
+    ->name('tenant.iot.')
+    ->group(function () {
+        Route::get('/sims', [SimController::class, 'index'])->name('sims.index');
+        Route::get('/quotas', [QuotaController::class, 'index'])->name('quotas.index');
+        Route::post('/sims', [SimController::class, 'store'])->name('sims.store');
+        // ... gestion complète
+    });
+
+// app/Modules/IoT/routes/client.php
+Route::middleware(['web', 'auth', 'client', 'client.ownership'])
+    ->prefix('iot')
+    ->name('client.iot.')
+    ->group(function () {
+        Route::get('/dashboard', [ClientIoTDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/sims', [ClientSimController::class, 'index'])->name('sims.index');
+        // ... vue limitée, lecture seule principalement
+    });
+
+// app/Modules/Central/routes/central.php
+Route::middleware(['web', 'auth', 'central', 'role:super_admin'])
+    ->prefix('hub')
+    ->name('central.')
+    ->group(function () {
+        Route::get('/dashboard', [HubDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/regions', [RegionController::class, 'index'])->name('regions.index');
+        // ...
+    });
+```
+
+Cela donne des noms de routes lisibles et sans ambiguïté :
+- `tenant.iot.sims.index` → admin gère les SIMs IoT
+- `client.iot.sims.index` → client voit ses SIMs IoT
+- `central.dashboard` → dashboard Hub
+
+> **Note multi-région** : Les modules s'exécutent dans chaque instance régionale. Le module `Central/` ne tourne que sur le Hub et gère la synchronisation catalogue, le registry des régions et le SSO. Son ServiceProvider ne charge rien en contexte tenant.
 
 ### Séparation des domaines métier : Telecom vs IoT vs UCaaS vs Infogérance
 
@@ -270,16 +452,27 @@ Règles complémentaires :
 3. **La logique métier vit dans Domain/** — les entités savent se valider, calculer leurs états, vérifier leurs invariants
 4. **L'infrastructure est interchangeable** — le jour où on change de driver (ex: Scout database → Meilisearch), seul `Infrastructure/` est impacté
 
-### Pattern API-first
+### Pattern API — Périmètre clarifié
+
+L'API REST `/api/v1/*` n'est **pas** utilisée pour l'architecture interne Hub ↔ régions. Elle est dédiée aux **interactions externes** :
+
+| Consommateur de l'API | Usage |
+|----------------------|-------|
+| **Portail client** (espace client) | Consultation consos, factures, lignes, tickets |
+| **Intégrations partenaires** | Fournisseurs, connecteurs tiers |
+| **Future app mobile** | Accès client mobile |
+
+Le **Hub central** et les **portails admin régionaux** restent en **architecture classique Livewire** (rendu serveur, pas d'API REST entre eux). La synchronisation Hub ↔ régions passe par des mécanismes internes (sync BDD via stancl/tenancy, events Laravel).
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   Laravel 12                         │
+│                   Laravel 14                         │
 │                                                      │
 │  ┌──────────────────────┐  ┌──────────────────┐    │
 │  │     Livewire 4       │  │   API REST       │    │
-│  │ (Admin + Client +    │  │   /api/v1/*      │    │
-│  │  Ambassadeur)        │  │   (mobile, etc.) │    │
+│  │ Hub + Admin régional │  │   /api/v1/*      │    │
+│  │ + Client + Ambassa.  │  │ (clients, mobile │    │
+│  │ (archi classique)    │  │  partenaires)    │    │
 │  └──────────┬───────────┘  └────────┬─────────┘    │
 │             │                       │               │
 │             ▼                       ▼               │
@@ -390,7 +583,98 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 
 > **Note multi-région** : Chaque BDD régionale contient ses propres factures. Le Hub central agrège uniquement les totaux dans `regional_summaries`.
 
-## 5. Risques identifiés
+## 5. Infrastructure de développement
+
+### Docker : services uniquement, app en natif
+
+L'app PHP tourne en **natif** (Laravel Herd, Valet ou `php artisan serve`). Seuls les **services annexes** sont conteneurisés — c'est plus rapide pour le dev, pas de volume mount lent, hot reload natif.
+
+L'app sera dockerisée intégralement **uniquement pour le staging/production**.
+
+```yaml
+# docker-compose.yml — services uniquement
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cekoya
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"   # UI web
+      - "1025:1025"   # SMTP
+
+volumes:
+  pgdata:
+```
+
+**Pourquoi Docker dès le jour 1 pour les services :**
+- **Parité dev** : avec multi-tenant database-per-tenant, chaque dev doit pouvoir créer des BDD dynamiquement. Docker Postgres = une commande.
+- **Multi-domaines locaux** : résolution de `hub.cekoya.local`, `reunion.cekoya.local`, `reunion-client.cekoya.local` — un reverse proxy Traefik/Caddy conteneurisé rend ça trivial.
+- **Services annexes** : Redis (cache + queue), Mailpit (mail catcher), éventuellement Meilisearch — aucun à installer sur la machine hôte.
+
+### Tenant = Base de données (stancl/tenancy)
+
+Un tenant correspond à **une base de données isolée**. La création d'un tenant est une opération SQL standard, indépendante de Docker.
+
+```
+PostgreSQL
+├── cekoya_central          # Base centrale (Hub)
+│   ├── tenants              # Registry des tenants
+│   ├── domains              # Mapping domaine → tenant
+│   ├── central_catalog      # Catalogue maître
+│   └── users                # Users centraux (SSO)
+│
+├── cekoya_reunion           # Tenant Réunion (= V1 migrée)
+│   ├── clients, prospects, telecom_lines, iot_sims...
+│   └── ...                  # Toutes les tables métier
+│
+├── cekoya_metropole         # Tenant Métropole
+│   └── ...                  # Même schéma, données isolées
+│
+└── cekoya_mayotte           # Tenant Mayotte
+    └── ...
+```
+
+**Création d'un tenant** — 3 étapes automatisées par stancl/tenancy :
+
+```php
+// Fonctionne partout — Docker ou pas, du moment que Postgres est accessible
+$tenant = Tenant::create([
+    'id' => 'reunion',
+    'name' => 'Cekoya Réunion',
+]);
+// stancl/tenancy déclenche automatiquement :
+// 1. CREATE DATABASE cekoya_reunion
+// 2. php artisan tenants:migrate --tenants=reunion
+// 3. Événements TenantCreated → CreateDatabase → MigrateDatabase
+
+// Ajout du domaine associé
+$tenant->domains()->create(['domain' => 'reunion.cekoya.fr']);
+```
+
+**Prérequis unique** : l'utilisateur PostgreSQL doit avoir le droit `CREATE DATABASE`. C'est une config Postgres, pas une dépendance Docker.
+
+**Modes de création de tenants :**
+| Contexte | Méthode |
+|----------|---------|
+| Dev local | `php artisan tenant:create reunion` (commande artisan) |
+| Dev local | `php artisan db:seed --class=TenantSeeder` (seeder avec données de test) |
+| Production | Interface Hub central (UI d'admin réservée super_admin) |
+| CI/CD | Seeder automatique dans le pipeline de test |
+
+## 6. Risques identifiés
 
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
@@ -399,10 +683,10 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 | Régression fonctionnelle | Moyenne | Élevé | Tests automatisés avant chaque migration de module |
 | Résistance au changement utilisateurs | Moyenne | Moyen | Migration progressive, UX similaire initialement |
 
-## 6. Points d'attention long terme
+## 7. Points d'attention long terme
 
 1. **Ne jamais coupler les modules** — c'est le premier réflexe sous pression et c'est ce qui a mené à la V1 actuelle
-2. **L'API interne est l'investissement le plus structurant** — elle permet de découpler les portails et prépare une future app mobile
+2. **L'API REST est dédiée aux liaisons clients et intégrations externes** — elle sert l'espace client (portail client), les intégrations partenaires et prépare une future app mobile. **Le Hub central et les régions restent en architecture classique** (Livewire, rendu serveur, pas d'API entre eux). L'API n'est pas utilisée pour la communication Hub ↔ régions qui passe par des mécanismes internes (sync BDD, events)
 3. **Le partitionnement CDR doit être automatisé** — création automatique des partitions mensuelles futures via un job planifié
 4. **Prévoir un module Integration dédié** — les connecteurs fournisseurs doivent être isolés derrière des interfaces pour pouvoir ajouter/remplacer un fournisseur sans impacter le métier
 5. **L'architecture multi-région doit être pensée dès le début** — les données de référence (catalogue, tarifs) sont centrales ; les données opérationnelles (clients, CDR, factures) sont régionales. Tout le code métier doit être agnostique de la région courante (le switch de BDD est transparent via stancl/tenancy)
@@ -410,10 +694,12 @@ La colonne `invoices.doc` (JSON) contient **l'intégralité** de chaque facture.
 
 ---
 
-> **Priorisation** :
-> - Court terme (0-3 mois) : Dockerisation, CI/CD, quick wins CDR (`client_id` + agrégation), Redis, Laravel 12, **install stancl/tenancy + BDD centrale**
-> - Moyen terme (3-6 mois) : API interne, modularisation, refonte facturation (sortie JSON blob), Livewire 4, **sync catalogue + SSO**
-> - Long terme (6-12 mois) : Portails client/amba Livewire 4, migration cloud, **provisioning auto de régions**, scaling
+> **Priorisation** (alignée sur la roadmap condensée du doc 00) :
+> - **Phase 0 (en cours)** : Montées de version (Laravel 10→11→14, Livewire 2→4, Pusher→Reverb, PHP ≥ 8.3), passage imports toModel→toCollection
+> - **Phase 1 (en cours / à suivre)** : CDR (`client_id`, `call_iots`, `call_ucass`, agrégations, index) + refonte facturation (`invoices_v2` + `invoice_lines`, dual-write, PDF async) + nettoyage BDD (`_bkp`, `pricing_zones`, orphelins)
+> - **Phase 2** : Redis, Horizon, worker séparé, audit trail, CI/CD, API REST (liaisons clients), gateways fournisseurs, Scout, modularisation DDD-lite, contrats `Billable` et `CollaboratorContract`
+> - **Phase 3** : stancl/tenancy, sync catalogue + SSO, portails client/amba/Hub Livewire 4, provisioning régions, sécurité (KMS, RGPD rétention, tests anti-fuite)
+> - **Phase 4 (ultérieure)** : Docker, migration cloud Scaleway, monitoring, backups par tenant, archivage CDR, IA (anomalies, optimisation forfaits, scoring, churn, assistant), scaling
 
 ---
 

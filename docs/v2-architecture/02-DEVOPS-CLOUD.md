@@ -15,7 +15,9 @@
 | Risque | Probabilité | Impact |
 |--------|-------------|--------|
 | Crash serveur = downtime total | Moyenne | **CRITIQUE** — perte de service pour 380 clients |
-| Perte de données (pas de backup off-site documenté) | Faible | **CRITIQUE** |
+| Perte de données (Situation non testée en condition..possibilité de perte) | Faible | **CRITIQUE** |
+| Taille du serveur limite pouvant causer une impossibilité de réinstaller la BDD | Élevée | Élevé |
+| Incohérence entre env de dev et prod | Certaine | Moyen |
 | Déploiement cassé sans rollback | Élevée | Élevé |
 | Pas de scaling possible | Certaine | Élevé (objectif de doubler le parc) |
 
@@ -55,7 +57,7 @@
     │  App Server 1  │ │ App Server 2 │ │  Worker      │
     │  (DEV1-Small)  │ │ (DEV1-Small) │ │  (queues)    │
     │  Docker        │ │ Docker       │ │  Docker      │
-    │  Laravel 12 +  │ │ Laravel 12 + │ │  horizon +   │
+    │  Laravel 13 +  │ │ Laravel 12 + │ │  horizon +   │
     │  stancl/tenant │ │ stancl/ten.  │ │  scheduler   │
     │  Nginx + PHP   │ │ Nginx + PHP  │ │  + sync jobs │
     └────────────────┘ └──────────────┘ └──────────────┘
@@ -305,6 +307,64 @@ deploy-production:
 
 ### 2. Le worker doit être séparé
 > Validé. Le worker (Laravel Horizon pour les queues + scheduler) **ne doit pas** tourner sur les mêmes instances que l'app web. Les imports Transatel horaires et l'agrégation CDR nocturne ne doivent pas impacter les performances web.
+
+**Détail du fonctionnement du worker séparé :**
+
+Le "worker séparé" désigne un **processus (ou serveur) dédié** qui exécute les tâches en arrière-plan, physiquement séparé du processus qui sert les requêtes HTTP aux utilisateurs.
+
+**Concrètement, comment ça fonctionne :**
+
+```
+Utilisateur → Nginx → PHP-FPM (App Web)       ← sert les pages, Livewire, etc.
+                          │
+                          │ dispatch(job)
+                          ▼
+                       Redis (queue)
+                          │
+                          │ poll
+                          ▼
+              PHP artisan queue:work (Worker)    ← processus séparé, dédié aux jobs
+              PHP artisan schedule:run           ← cron Laravel (scheduler)
+```
+
+1. **L'app web** (Nginx + PHP-FPM) reçoit les requêtes utilisateur et dispatche les tâches lourdes dans une **queue Redis** (par exemple : `ImportTransatelJob::dispatch()`)
+2. **Le worker** est un processus `php artisan queue:work` (ou Laravel Horizon) qui **tourne en boucle** et consomme les jobs de la queue Redis. Il n'a pas de Nginx, pas de port HTTP — il ne sert personne. Il traite les jobs.
+3. **Le scheduler** (`php artisan schedule:run` lancé par cron toutes les minutes) planifie les jobs récurrents (imports horaires Transatel, agrégation CDR nocturne, etc.)
+
+**Pourquoi les séparer ?**
+
+| Scénario | Sans séparation | Avec séparation |
+|----------|----------------|-----------------|
+| Import Transatel horaire (traitement de 50K CDR) | PHP-FPM monopolise les workers, les pages admin ralentissent | Le worker traite les CDR sur son propre CPU/RAM, l'app web reste réactive |
+| Agrégation CDR nocturne (scan de millions de lignes) | La mémoire PHP-FPM explose, risque de crash du serveur web | Le worker consomme sa propre mémoire, le serveur web dort tranquille |
+| Pic de connexions utilisateurs le matin | Les jobs en attente bloquent les workers PHP-FPM | Les queues attendent patiemment dans Redis, le web a toutes ses ressources |
+
+**Comment mettre en place concrètement (sans Docker) :**
+
+Sur le **même serveur physique**, il suffit de lancer les processus séparément :
+
+```bash
+# Processus 1 : l'app web (déjà en place)
+# Nginx + PHP-FPM, qui sert les requêtes HTTP
+
+# Processus 2 : le worker (à ajouter)
+# Supervisord maintient le processus en vie
+# /etc/supervisor/conf.d/cekoya-worker.conf
+[program:cekoya-worker]
+command=php /var/www/cekoya/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+numprocs=2
+redirect_stderr=true
+stdout_logfile=/var/log/cekoya-worker.log
+
+# Processus 3 : le scheduler (à ajouter dans crontab)
+* * * * * cd /var/www/cekoya && php artisan schedule:run >> /dev/null 2>&1
+```
+
+La séparation est **logique** (processus distincts), pas forcément physique (serveurs distincts). Sur un seul serveur, Supervisord gère le worker comme un service système. L'avantage : si le worker plante (OOM sur un gros import), l'app web continue de tourner normalement.
+
+À terme (Phase 4 — cloud), le worker pourrait tourner sur un **serveur dédié** pour une isolation totale des ressources.
 
 ### 3. Recherche — Laravel Scout avec database driver
 > Pas besoin de service tiers (Meilisearch, Elasticsearch). Laravel Scout avec le database driver utilise MySQL directement (FULLTEXT ou LIKE). Zéro coût additionnel, zéro service à maintenir. Si la volumétrie l'exige un jour (> 100K entités par tenant), on pourra passer à Meilisearch — le changement est transparent grâce à l'abstraction Scout.

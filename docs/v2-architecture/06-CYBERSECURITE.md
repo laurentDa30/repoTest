@@ -174,27 +174,197 @@ class Client extends Model
 | Credentials BDD par tenant | N/A | Scaleway Secret Manager (un secret par région) |
 | Tokens Yousign | `.env` | Scaleway Secret Manager |
 
-### D. Audit Trail
+### D. Audit Trail — Implémentation custom (sans spatie/laravel-activitylog)
+
+#### Décision : Middleware HTTP + Trait Auditable (pas de package externe)
+
+L'audit est implémenté en interne via deux mécanismes complémentaires, sans dépendance à `spatie/laravel-activitylog`. Cela donne un contrôle total sur les données loguées et évite une abstraction supplémentaire.
+
+#### Niveau 1 — Middleware `AuditLog` (actions utilisateur)
+
+Capture **toutes les interactions utilisateur** : connexions, navigation, actions CRUD.
 
 ```php
-// Implémentation via spatie/laravel-activitylog
+// app/Http/Middleware/AuditLog.php
+class AuditLog
+{
+    public function handle(Request $request, Closure $next): mixed
+    {
+        $response = $next($request);
 
-// Toute modification sur une entité sensible est loguée
-activity()
-    ->performedOn($client)
-    ->causedBy($user)
-    ->withProperties([
-        'old' => $client->getOriginal(),
-        'new' => $client->getAttributes(),
-        'ip' => request()->ip(),
-        'user_agent' => request()->userAgent(),
-    ])
-    ->log('updated');
+        if ($this->shouldSkip($request)) {
+            return $response;
+        }
 
-// Consultation possible dans l'admin (menu Logs existant)
-// Conservation : 2 ans minimum
-// Immutabilité : table d'audit en append-only, pas de DELETE autorisé
+        AuditEntry::create([
+            // QUI
+            'user_id'       => auth()->id(),
+            'user_name'     => auth()->user()?->name,
+            'team_id'       => auth()->user()?->current_team_id,
+            'ip'            => $request->ip(),
+            'user_agent'    => $request->userAgent(),
+
+            // QUOI
+            'action'        => $this->resolveAction($request),
+            'method'        => $request->method(),
+            'url'           => $request->fullUrl(),
+            'route_name'    => $request->route()?->getName(),
+
+            // DÉTAILS
+            'payload'       => $this->sanitize($request->all()),
+            'response_code' => $response->getStatusCode(),
+
+            // CONTEXTE
+            'session_id'    => session()->getId(),
+            'referer'       => $request->header('referer'),
+        ]);
+
+        return $response;
+    }
+
+    protected function resolveAction(Request $request): string
+    {
+        if ($request->routeIs('login') && $request->isMethod('POST')) {
+            return 'login';
+        }
+        if ($request->routeIs('logout')) {
+            return 'logout';
+        }
+
+        return match ($request->method()) {
+            'GET'    => 'visit',
+            'POST'   => 'create',
+            'PUT', 'PATCH' => 'update',
+            'DELETE' => 'delete',
+            default  => 'other',
+        };
+    }
+
+    protected function sanitize(array $data): array
+    {
+        $hidden = ['password', 'password_confirmation', 'token', 'secret', '_token'];
+
+        return collect($data)
+            ->except($hidden)
+            ->map(fn ($value) => is_string($value) && strlen($value) > 500
+                ? substr($value, 0, 500) . '...[tronqué]'
+                : $value
+            )
+            ->toArray();
+    }
+
+    protected function shouldSkip(Request $request): bool
+    {
+        return $request->is('livewire/*')
+            || $request->is('_debugbar/*')
+            || $request->ajax() && $request->isMethod('GET');
+    }
+}
 ```
+
+Application sur les routes admin :
+
+```php
+Route::group([
+    'as' => 'admin.',
+    'middleware' => ['auth', 'team.access', 'audit-log'],
+    'domain' => config('app.domain_back_office'),
+], function () {
+    // ...
+});
+```
+
+#### Niveau 2 — Trait `Auditable` (mutations modèle)
+
+Capture **les changements réels sur les données** — fonctionne aussi hors HTTP (Jobs, Artisan).
+
+```php
+// app/Support/Traits/Auditable.php
+trait Auditable
+{
+    public static function bootAuditable(): void
+    {
+        static::created(fn ($model) => self::audit('created', $model));
+        static::updated(fn ($model) => self::audit('updated', $model));
+        static::deleted(fn ($model) => self::audit('deleted', $model));
+    }
+
+    protected static function audit(string $event, $model): void
+    {
+        AuditEntry::create([
+            'event'   => $event,
+            'model'   => $model::class,
+            'id'      => $model->getKey(),
+            'changes' => $model->getChanges(),
+            'user_id' => auth()->id(),
+        ]);
+    }
+}
+```
+
+#### Table `audit_entries`
+
+```php
+Schema::create('audit_entries', function (Blueprint $table) {
+    $table->id();
+
+    // QUI
+    $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('user_name')->nullable();
+    $table->unsignedBigInteger('team_id')->nullable();
+    $table->string('ip', 45);
+    $table->string('user_agent')->nullable();
+
+    // QUOI
+    $table->string('action');         // login, logout, visit, create, update, delete
+    $table->string('method', 10);
+    $table->text('url');
+    $table->string('route_name')->nullable();
+
+    // DÉTAILS
+    $table->json('payload')->nullable();
+    $table->smallInteger('response_code');
+
+    // CONTEXTE
+    $table->string('session_id')->nullable();
+    $table->text('referer')->nullable();
+
+    $table->timestamp('created_at');
+
+    // Index pour les requêtes fréquentes
+    $table->index('user_id');
+    $table->index('action');
+    $table->index('created_at');
+    $table->index('session_id');
+});
+```
+
+#### Requêtes d'audit courantes
+
+| Question | Requête |
+|----------|---------|
+| Qui s'est connecté aujourd'hui ? | `AuditEntry::action('login')->today()->get()` |
+| Que fait un utilisateur en ce moment ? | `AuditEntry::forUser($id)->today()->latest()->take(20)->get()` |
+| Qui a supprimé ce device ? | `AuditEntry::action('delete')->where('url', 'like', '%device%')->get()` |
+| Parcours complet d'une session | `AuditEntry::where('session_id', $sid)->orderBy('created_at')->get()` |
+
+#### Purge automatique
+
+```php
+// Dans AuditEntry.php
+use Prunable;
+
+public function prunable(): Builder
+{
+    return static::where('created_at', '<', now()->subMonths(3));
+}
+
+// Scheduler
+Schedule::command('model:prune', ['--model' => AuditEntry::class])->daily();
+```
+
+Conservation : **3 mois** pour les logs de navigation, **2 ans** pour les actions sensibles (login, create, update, delete sur entités critiques).
+Immutabilité : table en append-only, pas de DELETE autorisé en dehors de la purge automatique.
 
 ### E. Sécurité des intégrations fournisseurs
 
